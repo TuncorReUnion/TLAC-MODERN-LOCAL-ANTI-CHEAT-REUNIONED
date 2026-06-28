@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+#[derive(Debug)]
 pub enum KernelStatus {
     Clean,
     Suspicious,
@@ -39,6 +40,6 @@ mod tests {
     #[test]
     fn test_read_status() {
         let status = read_kernel_status();
-        println!("Kernel Status: {:?}", status);
+        println!("Kernel Status: {:?}", status);  // Artık çalışır
     }
 }
