@@ -22,7 +22,7 @@ static int check_system_integrity(void) {
         return -1;
     }
 
-    buffer = kmalloc(4096, GFP_KERNEL);
+    buffer = kmalloc(4097, GFP_KERNEL);
     if (!buffer)
     {
         filp_close(f, NULL);
