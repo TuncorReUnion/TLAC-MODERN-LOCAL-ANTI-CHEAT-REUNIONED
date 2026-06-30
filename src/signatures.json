@@ -12,11 +12,11 @@
       "min_confidence": 0.9
     },
     {
-    "id": "aimbot_view_angle_write_001",
-    "name": "Aimbot: Writing Angle of View",
-    "pattern": "89 45 ?? 89 45 ?? 8B 45 ?? 89 45 ?? C3",
-    "severity": "high",
-    "memory_regions": ["writable", "executable"]
+      "id": "aimbot_view_angle_write_001",
+      "name": "Aimbot: Writing Angle of View",
+      "pattern": "89 45 ?? 89 45 ?? 8B 45 ?? 89 45 ?? C3",
+      "severity": "high",
+      "memory_regions": ["writable", "executable"]
     },
     {
       "id": "esp_render_hook_001",
@@ -28,11 +28,11 @@
       "min_confidence": 0.95
     },
     {
-    "id": "wallhack_visibility_patch_001",
-    "name": "Wallhack: Visibility Flag",
-    "pattern": "C6 43 ? 01 E9 ?? ?? ?? ?? 90",
-    "severity": "high",
-    "memory_regions": ["writable", "executable"]
+      "id": "wallhack_visibility_patch_001",
+      "name": "Wallhack: Visibility Flag",
+      "pattern": "C6 43 ? 01 E9 ?? ?? ?? ?? 90",
+      "severity": "high",
+      "memory_regions": ["writable", "executable"]
     },
     {
       "id": "memory_freeze_001",
@@ -51,6 +51,51 @@
       "severity": "High",
       "memory_regions": ["Executable"],
       "min_confidence": 0.85
+    },
+    {
+      "id": "vm_protect_detection_001",
+      "name": "VMProtect: VM Detection",
+      "pattern": "0F 01 D0 0F 01 D1 0F 01 D2 0F 01 D3",
+      "description": "Sanal makine tespiti için kullanılan CPUID talimatları",
+      "severity": "critical",
+      "memory_regions": ["executable"],
+      "min_confidence": 0.9
+    },
+    {
+      "id": "debugger_check_001",
+      "name": "Anti-Debug: Debugger Detection",
+      "pattern": "64 48 8B 04 25 30 00 00 00 48 85 C0 74 09",
+      "description": "PEB->BeingDebugged flag kontrolü",
+      "severity": "high",
+      "memory_regions": ["executable"],
+      "min_confidence": 0.85
+    },
+    {
+      "id": "process_hollowing_001",
+      "name": "Process Hollowing: Suspended Process",
+      "pattern": "48 89 45 ?? 48 89 45 ?? 48 89 45 ?? 48 89 45 ??",
+      "description": "Suspended process oluşturma ve enjeksiyon",
+      "severity": "critical",
+      "memory_regions": ["executable"],
+      "min_confidence": 0.9
+    },
+    {
+      "id": "inline_hook_detection_001",
+      "name": "Inline Hook: JMP Instruction",
+      "pattern": "E9 ?? ?? ?? ?? 48 89 5C 24 ?? 48 89 74 24 ??",
+      "description": "5 baytlık JMP ile inline hook tespiti",
+      "severity": "high",
+      "memory_regions": ["executable"],
+      "min_confidence": 0.85
+    },
+    {
+      "id": "trampoline_hook_001",
+      "name": "Trampoline Hook: Detour Pattern",
+      "pattern": "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? FF E0 48 89 5C 24",
+      "description": "Detour ile fonksiyon hook tespiti",
+      "severity": "critical",
+      "memory_regions": ["executable"],
+      "min_confidence": 0.95
     },
     {
       "id": "norecoil_patch_001",
