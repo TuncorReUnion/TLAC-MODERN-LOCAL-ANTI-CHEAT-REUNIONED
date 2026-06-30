@@ -1,12 +1,12 @@
 #!/bin/bash
 #
-# TLAC v2.0 - Release Installer
+# TLAC v3.0 - Installer (Sadece Kurulum, Derleme YOK)
 # TuncorReUnion - 2026
 #
 
 set -e
 
-# Renkli çıktı
+# Renkli çıktı için
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -29,13 +29,17 @@ KERNEL_VERSION=$(uname -r)
 BIN_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/tlac"
 MODULE_DIR="/lib/modules/${KERNEL_VERSION}/extra"
+BPF_DIR="/usr/lib/tlac/bpf"
 
-print_status "TLAC v2.0 Kurulumu başlatılıyor..."
+print_status "TLAC v3.0 Kurulumu başlatılıyor..."
+print_status "Kernel: ${KERNEL_VERSION}"
 
 # Klasörleri oluştur
+print_status "Klasörler oluşturuluyor..."
 mkdir -p "$BIN_DIR"
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$MODULE_DIR"
+mkdir -p "$BPF_DIR"
 
 # ============================================
 # 1. ANA BINARY (Anti-Cheat)
@@ -71,7 +75,7 @@ else
 fi
 
 # ============================================
-# 4. KERNEL MODÜLÜ
+# 4. KERNEL MODÜLÜ (Hazır .ko dosyasını kopyala)
 # ============================================
 if [ -f "tlac_kernel.ko" ]; then
     cp tlac_kernel.ko "$MODULE_DIR/"
@@ -93,14 +97,24 @@ else
 fi
 
 # ============================================
-# 5. KURULUM SONRASI
+# 5. eBPF PROGRAMI
+# ============================================
+if [ -f "bpf/program.bpf.o" ]; then
+    cp bpf/program.bpf.o "$BPF_DIR/"
+    print_success "program.bpf.o -> $BPF_DIR/"
+else
+    print_warning "program.bpf.o bulunamadı (eBPF atlandı)"
+fi
+
+# ============================================
+# 6. KURULUM SONRASI
 # ============================================
 if [ -f "/proc/tlac_status" ]; then
     print_success "/proc/tlac_status aktif!"
     cat /proc/tlac_status
 fi
 
-print_success "TLAC v2.0 kurulumu tamamlandı!"
+print_success "TLAC v3.0 kurulumu tamamlandı!"
 echo ""
 echo "📦 Kullanım:"
 echo "  sudo tlac <PID>"
@@ -112,3 +126,4 @@ echo "  Ana Binary:   $BIN_DIR/tlac"
 echo "  Sunucu:       $BIN_DIR/ac-server"
 echo "  Config:       $CONFIG_DIR/signatures.json"
 echo "  Kernel Modülü: $MODULE_DIR/tlac_kernel.ko"
+echo "  eBPF:         $BPF_DIR/program.bpf.o"
