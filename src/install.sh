@@ -1,12 +1,11 @@
 #!/bin/bash
 #
-# TLAC v3.0 - Installer (Sadece Kurulum, Derleme YOK)
+# TLAC v3.0 - Installer
 # TuncorReUnion - 2026
 #
 
 set -e
 
-# Renkli çıktı için
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -18,7 +17,6 @@ print_success() { echo -e "${GREEN}[+]${NC} $1"; }
 print_error() { echo -e "${RED}[!]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[⚠]${NC} $1"; }
 
-# Root kontrolü
 if [ "$EUID" -ne 0 ]; then 
     print_error "Bu betik root yetkileriyle çalıştırılmalıdır!"
     echo "Kullanım: sudo ./install.sh"
@@ -34,15 +32,13 @@ BPF_DIR="/usr/lib/tlac/bpf"
 print_status "TLAC v3.0 Kurulumu başlatılıyor..."
 print_status "Kernel: ${KERNEL_VERSION}"
 
-# Klasörleri oluştur
-print_status "Klasörler oluşturuluyor..."
 mkdir -p "$BIN_DIR"
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$MODULE_DIR"
 mkdir -p "$BPF_DIR"
 
 # ============================================
-# 1. ANA BINARY (Anti-Cheat)
+# 1. ANA BINARY
 # ============================================
 if [ -f "Anti-Cheat" ]; then
     cp Anti-Cheat "$BIN_DIR/tlac"
@@ -54,7 +50,7 @@ else
 fi
 
 # ============================================
-# 2. SUNUCU BINARY (ac-server)
+# 2. SUNUCU BINARY
 # ============================================
 if [ -f "ac-server" ]; then
     cp ac-server "$BIN_DIR/ac-server"
@@ -65,7 +61,7 @@ else
 fi
 
 # ============================================
-# 3. KONFİGÜRASYON DOSYASI
+# 3. KONFİGÜRASYON
 # ============================================
 if [ -f "signatures.json" ]; then
     cp signatures.json "$CONFIG_DIR/"
@@ -75,13 +71,12 @@ else
 fi
 
 # ============================================
-# 4. KERNEL MODÜLÜ (Hazır .ko dosyasını kopyala)
+# 4. KERNEL MODÜLÜ (kernel/ klasöründen)
 # ============================================
-if [ -f "tlac_kernel.ko" ]; then
-    cp tlac_kernel.ko "$MODULE_DIR/"
+if [ -f "kernel/tlac_kernel.ko" ]; then
+    cp kernel/tlac_kernel.ko "$MODULE_DIR/"
     print_success "tlac_kernel.ko -> $MODULE_DIR/"
 
-    # Modülü yükle
     print_status "Kernel modülü yükleniyor..."
     if lsmod | grep -q "^tlac_kernel"; then
         rmmod tlac_kernel 2>/dev/null
@@ -93,17 +88,17 @@ if [ -f "tlac_kernel.ko" ]; then
         print_warning "Kernel modülü yüklenemedi (dmesg kontrol et)"
     fi
 else
-    print_warning "tlac_kernel.ko bulunamadı (modül atlandı)"
+    print_warning "kernel/tlac_kernel.ko bulunamadı (modül atlandı)"
 fi
 
 # ============================================
-# 5. eBPF PROGRAMI
+# 5. eBPF PROGRAMI (bpf/ klasöründen)
 # ============================================
 if [ -f "bpf/program.bpf.o" ]; then
     cp bpf/program.bpf.o "$BPF_DIR/"
     print_success "program.bpf.o -> $BPF_DIR/"
 else
-    print_warning "program.bpf.o bulunamadı (eBPF atlandı)"
+    print_warning "bpf/program.bpf.o bulunamadı (eBPF atlandı)"
 fi
 
 # ============================================
