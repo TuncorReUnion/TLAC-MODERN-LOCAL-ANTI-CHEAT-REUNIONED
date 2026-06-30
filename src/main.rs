@@ -551,14 +551,14 @@ fn parse_pattern(pattern_str: &str) -> Vec<Option<u8>>
     .collect()
 }
 
-fn load_signatures(_path: &str) -> Result<Vec<CheatSignature>, Box<dyn std::error::Error>>
+fn load_signatures() -> Result<Vec<CheatSignature>, Box<dyn std::error::Error>>
 {
     let binary_dir = env::current_exe()
     .ok()
     .and_then(|p| p.parent().map(PathBuf::from))
     .unwrap_or_else(|| PathBuf::from("."));
 
-    let sig_path = binary_dir.join("signatures.json");
+    let sig_path = PathBuf::from("/etc/tlac/signatures.json");
 
     let content = fs::read_to_string(&sig_path)?;
     let file: SignatureFile = serde_json::from_str(&content)?;
