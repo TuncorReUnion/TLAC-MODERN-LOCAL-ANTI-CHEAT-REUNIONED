@@ -2,7 +2,7 @@ use anti_cheat::messages::AntiCheatMessage;
 use anti_cheat::sync_client::SyncClient;
 use tokio::net::UnixStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use rusqlite::{Connection, Error as SqliteError};
+use rusqlite::Connection;
 use sha2::{Sha256, Digest};
 use serde::{Deserialize, Serialize};
 use nix::sys::ptrace;
@@ -16,11 +16,8 @@ use std::fs;
 use std::path::PathBuf;
 
 mod proc_status;
-
 mod messages;
-
 mod sync_client;
-
 
 #[derive(Deserialize, Serialize, Debug, Default)]
 struct AntiCheatConfig
@@ -54,22 +51,22 @@ fn load_config() -> Result<AntiCheatConfig, Box<dyn std::error::Error>>
 
 fn default_interval() -> u64 { 5000 }
 
-fn get_config_path() -> PathBuf 
+fn get_config_path() -> PathBuf
 {
-    if let Ok(path) = env::var("TLAC_CONFIG") 
+    if let Ok(path) = env::var("TLAC_CONFIG")
     {
         return PathBuf::from(path);
     }
 
-    let home_dir = if let Ok(user) = env::var("SUDO_USER") 
+    let home_dir = if let Ok(user) = env::var("SUDO_USER")
     {
         PathBuf::from("/home").join(user)
-    } 
-    else 
+    }
+    else
     {
         env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("/root"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/root"))
     };
 
     home_dir.join(".config").join("tlac").join("config.json")
@@ -211,7 +208,7 @@ fn search_wildcard_pattern_in_bytes(bytes: &[u8], pattern: &[Option<u8>]) -> Opt
 }
 
 fn search_wildcard_pattern_in_memory(pid: u32, start: usize, len: usize, pattern: &[Option<u8>]) -> Option<usize> {
-    if let Ok(memory) = read_memory_range(pid, start, len) 
+    if let Ok(memory) = read_memory_range(pid, start, len)
     {
         if let Some(pos) = search_wildcard_pattern_in_bytes(&memory, pattern)
         {
@@ -258,7 +255,7 @@ fn scan_process_for_cheat_signatures(pid: u32, signatures: &[Vec<Option<u8>>]) -
     Ok(())
 }
 
-fn calculate_binary_hash() -> Result<String, Box<dyn std::error::Error>> 
+fn calculate_binary_hash() -> Result<String, Box<dyn std::error::Error>>
 {
     let exe_path = env::current_exe()?;
     let content = fs::read(exe_path)?;
@@ -291,13 +288,13 @@ fn verify_binary_integrity(expected_hash: &str) -> Result<(), Box<dyn std::error
 async fn send_to_server(socket_path: &str, msg: &AntiCheatMessage) -> Result<(), Box<dyn std::error::Error>>
 {
     let mut stream = UnixStream::connect(socket_path).await?;
-    
+
     let data = serde_json::to_vec(msg)?;
     stream.write_all(&data).await?;
-    
+
     let mut buf = [0u8; 1024];
     let _ = stream.read(&mut buf).await;
-    
+
     Ok(())
 }
 
@@ -336,24 +333,24 @@ fn init_db() -> Result<Connection, Box<dyn std::error::Error>>
 fn generate_hwid() -> String
 {
     let mut hasher = Sha256::new();
-    
-    if let Ok(uuid) = fs::read_to_string("/sys/class/dmi/id/product_uuid") 
+
+    if let Ok(uuid) = fs::read_to_string("/sys/class/dmi/id/product_uuid")
     {
         hasher.update(uuid.trim());
     }
-    
-    if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo") 
+
+    if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo")
     {
-        if let Some(serial) = cpuinfo.lines().find(|l| l.starts_with("serial")) 
+        if let Some(serial) = cpuinfo.lines().find(|l| l.starts_with("serial"))
         {
             hasher.update(serial);
         }
     }
-    
-    if let Ok(mac) = fs::read_to_string("/sys/class/net/eth0/address") 
+
+    if let Ok(mac) = fs::read_to_string("/sys/class/net/eth0/address")
     {
         hasher.update(mac.trim());
-    } 
+    }
     else if let Ok(mac) = fs::read_to_string("/sys/class/net/wlan0/address")
     {
         hasher.update(mac.trim());
@@ -381,8 +378,8 @@ fn is_hwid_banned(conn: &Connection, hwid: &str) -> std::result::Result<bool, Bo
     let count: u32 = conn.query_row
     (
         "SELECT COUNT(*) FROM hwid_bans WHERE hwid = ?1",
-        [hwid],
-        |row| row.get(0),
+     [hwid],
+     |row| row.get(0),
     )?;
     Ok(count > 0)
 }
@@ -414,19 +411,19 @@ async fn main()
         "SELECT COUNT(*) FROM hwid_bans", [], |row| row.get(0)
     ).unwrap_or(0);
     let sync_client = SyncClient::new("http://127.0.0.1:5000");
-    match sync_client.sync_bans(&hwid, local_count).await 
+    match sync_client.sync_bans(&hwid, local_count).await
     {
         Ok(sync_data) => {
             println!("📥 Sunucudan {} ban alındı.", sync_data.bans.len());
-            for ban in &sync_data.bans 
+            for ban in &sync_data.bans
             {
                 conn.execute(
                     "INSERT OR IGNORE INTO hwid_bans (hwid, reason, banned_at) VALUES (?1, ?2, ?3)",
-                    [&ban.hwid, &ban.reason, &ban.banned_at],
-                ).ok(); // Hata olsa bile devam et
+                             [&ban.hwid, &ban.reason, &ban.banned_at],
+                ).ok();
             }
         }
-        Err(e) => 
+        Err(e) =>
         {
             eprintln!("⚠️ Sync başarısız, yerel veritabanı kullanılıyor: {}", e);
         }
@@ -437,7 +434,7 @@ async fn main()
         "SELECT COUNT(*) > 0 FROM hwid_bans WHERE hwid = ?1", [&hwid], |row| row.get(0)
     ).unwrap_or(false);
 
-    if is_banned 
+    if is_banned
     {
         eprintln!("🚫 HWID banlı! Sistem başlatılamıyor.");
         std::process::exit(1);
@@ -553,13 +550,7 @@ fn parse_pattern(pattern_str: &str) -> Vec<Option<u8>>
 
 fn load_signatures() -> Result<Vec<CheatSignature>, Box<dyn std::error::Error>>
 {
-    let binary_dir = env::current_exe()
-    .ok()
-    .and_then(|p| p.parent().map(PathBuf::from))
-    .unwrap_or_else(|| PathBuf::from("."));
-
     let sig_path = PathBuf::from("/etc/tlac/signatures.json");
-
     let content = fs::read_to_string(&sig_path)?;
     let file: SignatureFile = serde_json::from_str(&content)?;
     Ok(file.signatures)
@@ -569,7 +560,7 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
 {
     const MAX_REGION_SIZE: usize = 256 * 1024 * 1024;
 
-    let sigs = match load_signatures("signatures.json")
+    let sigs = match load_signatures()
     {
         Ok(s) => s,
         Err(e) =>
@@ -616,7 +607,7 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
             }
 
             let start = map.address.0 as usize;
-            let len = region_size as usize; // ✅ region_size zaten güvenli
+            let len = region_size as usize;
 
             if let Some(offset) = search_wildcard_pattern_in_memory(pid, start, len, &pattern)
             {
