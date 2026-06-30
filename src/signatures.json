@@ -5,11 +5,18 @@
     {
       "id": "aimbot_input_hook_001",
       "name": "Aimbot: Input Hook (X11/Wayland)",
-      "pattern": "FF 15 ? ? ? ? 85 C0 74 ? 48 8B ? ?",
+      "pattern": "F3 0F 59 ?? F3 0F 58 ?? F3 0F 5E ?? C3",
       "description": "XQueryPointer veya benzeri input fonksiyon hook'u",
       "severity": "Critical",
       "memory_regions": ["Executable"],
       "min_confidence": 0.9
+    },
+    {
+    "id": "aimbot_view_angle_write_001",
+    "name": "Aimbot: Writing Angle of View",
+    "pattern": "89 45 ?? 89 45 ?? 8B 45 ?? 89 45 ?? C3",
+    "severity": "high",
+    "memory_regions": ["writable", "executable"]
     },
     {
       "id": "esp_render_hook_001",
@@ -19,6 +26,13 @@
       "severity": "Critical",
       "memory_regions": ["Executable"],
       "min_confidence": 0.95
+    },
+    {
+    "id": "wallhack_visibility_patch_001",
+    "name": "Wallhack: Visibility Flag",
+    "pattern": "C6 43 ? 01 E9 ?? ?? ?? ?? 90",
+    "severity": "high",
+    "memory_regions": ["writable", "executable"]
     },
     {
       "id": "memory_freeze_001",
@@ -57,6 +71,20 @@
       "min_confidence": 0.9
     },
     {
+      "id": "triggerbot_auto_fire_001",
+      "name": "Triggerbot: Auto-Fire Detection",
+      "pattern": "C3 8B 45 ?? 85 C0 74 ?? 8B 45 ?? FF D0",
+      "severity": "high",
+      "memory_regions": ["executable"]
+    },
+    {
+      "id": "triggerbot_health_check_001",
+      "name": "Triggerbot: Health Check Bypass",
+      "pattern": "83 7D ?? 00 74 ?? 8B 45 ?? 89 45 ??",
+      "severity": "medium",
+      "memory_regions": ["writable", "executable"]
+    },
+    {
       "id": "radar_esp_read_001",
       "name": "Radar Hack: Entity List Dump",
       "pattern": "48 8B ? ? ? ? ? 48 8D ? ? 48 89 ? ? E8",
@@ -64,6 +92,20 @@
       "severity": "Critical",
       "memory_regions": ["Executable"],
       "min_confidence": 0.95
+    },
+    {
+      "id": "weapon_damage_mod_001",
+      "name": "Weapon Mod: Damage Modifier",
+      "pattern": "89 45 ?? C7 45 ?? ?? ?? ?? ?? C3",
+      "severity": "high",
+      "memory_regions": ["writable"]
+    },
+    {
+      "id": "weapon_firerate_mod_001",
+      "name": "Weapon Mod: Firerate Modifier",
+      "pattern": "C7 45 ?? ?? ?? ?? ?? 89 45 ?? C3",
+      "severity": "medium",
+      "memory_regions": ["writable"]
     },
     {
       "id": "so_inject_001",
@@ -91,6 +133,48 @@
       "severity": "High",
       "memory_regions": ["Executable"],
       "min_confidence": 0.85
+    },
+    {
+      "id": "speedhack_velocity_mod_001",
+      "name": "Speedhack: Velocity Modifier",
+      "pattern": "F3 0F 59 ?? ?? ?? ?? ?? F3 0F 58 ?? ?? ?? ?? ??",
+      "severity": "high",
+      "memory_regions": ["writable", "executable"]
+    },
+    {
+      "id": "flyhack_gravity_mod_001",
+      "name": "Flyhack: Gravity Modifier",
+      "pattern": "89 45 ?? 8B 45 ?? 89 45 ?? 8B 45 ?? C3",
+      "severity": "medium",
+      "memory_regions": ["writable"]
+    },
+    {
+      "id": "dll_injection_trampoline_001",
+      "name": "Injection: DLL Trampoline Detection",
+      "pattern": "48 B8 ?? ?? ?? ?? ?? ?? ?? ?? FF E0",
+      "severity": "critical",
+      "memory_regions": ["executable"]
+    },
+    {
+      "id": "so_injection_hook_001",
+      "name": "Injection: SO Hook Detection",
+      "pattern": "55 48 89 E5 48 83 EC ?? 48 89 7D ?? 48 89 75 ??",
+      "severity": "critical",
+      "memory_regions": ["executable"]
+    },
+    {
+      "id": "ue4_player_controller_001",
+      "name": "UE4: Player Controller Manipulation",
+      "pattern": "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01 FF 50 ??",
+      "severity": "critical",
+      "memory_regions": ["executable"]
+    },
+    {
+      "id": "ue5_world_to_screen_001",
+      "name": "UE5: World to Screen Hook",
+      "pattern": "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 ?? 48 8B 01 FF 50 ?? C3",
+      "severity": "critical",
+      "memory_regions": ["executable"]
     },
     {
       "id": "string_xor_001",
