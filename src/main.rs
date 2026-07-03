@@ -33,16 +33,33 @@ struct AntiCheatConfig
 }
 
 tokio::spawn(async move {
-    for cpu in online_cpus()? {
-        let mut events = perf.open(cpu, None)?;
-        loop {
-            let batch = events.read_events(10, Duration::from_millis(100))?;
-            for event in batch {
-                if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(&event.data) {
-                    warn!("⚠️ Suspicious file opened: {} by PID {}", evt.filename, evt.pid);
-                    // → burada ban komutu gönderilebilir
+    match online_cpus() {
+        Ok(cpus) => {
+            for cpu in cpus {
+                if let Ok(mut events) = perf.open(cpu, None) {
+                    loop {
+                        match events.read_events(10, tokio::time::Duration::from_millis(100)) {
+                            Ok(batch) => {
+                                for event in batch {
+                                    if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(&event.data) {
+                                        warn!("⚠️ Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
+                                        // → Buraya ban komutu gönderilebilir
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("BPF event read error: {}", e);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                            }
+                        }
+                    }
+                } else {
+                    warn!("Failed to open perf event for CPU {}", cpu);
                 }
             }
+        }
+        Err(e) => {
+            error!("Failed to get online CPUs: {}", e);
         }
     }
 });
