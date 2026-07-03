@@ -37,7 +37,7 @@
     {
       "id": "memory_freeze_001",
       "name": "Memory Edit: Health/Ammo Freeze",
-      "pattern": "89 40 ? C3",
+      "pattern": "89 40 08 89 40 10 C3",
       "description": "mov [rax+offset], eax ; ret (değer sabitleme)",
       "severity": "High",
       "memory_regions": ["Writable", "Data"],
