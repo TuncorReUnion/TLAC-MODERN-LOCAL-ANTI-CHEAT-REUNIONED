@@ -30,4 +30,5 @@ tokio = { version = "1", features = ["full"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.13.3", features = ["json"] }
-aya = "0.14.0"
+aya = "0.19"
+aya-log = "0.1"
