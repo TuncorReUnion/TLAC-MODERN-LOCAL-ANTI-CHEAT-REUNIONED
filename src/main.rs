@@ -17,8 +17,8 @@ use log::{warn, error, info};
 use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
 
-use aya::Ebpf;
-use aya::maps::PerfEventArray;
+use aya::Bpf;
+use aya::maps::perf::PerfEventArray;
 use aya::util::online_cpus;
 
 mod proc_status;
@@ -272,7 +272,7 @@ fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
     let expected = get_embedded_hash().trim();
     
     if expected.is_empty() {
-        warn!("️ Binary hash embed edilmemiş (ilk derleme). Integrity check atlanıyor.");
+        warn!("⚠️ Binary hash embed edilmemiş (ilk derleme). Integrity check atlanıyor.");
         return Ok(());
     }
 
@@ -313,9 +313,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match read_kernel_status() {
         KernelStatus::Clean => info!("🛡️ Sistem temiz."),
         KernelStatus::Suspicious => {
-            warn!("️ UYARI: Sistemde şüpheli aktivite tespit edildi!");
+            warn!("⚠️ UYARI: Sistemde şüpheli aktivite tespit edildi!");
             let _ = ban_hwid(&conn, &hwid, "Kernel modülü şüpheli aktivite tespit etti");
-            error!(" Sistem kapatılıyor.");
+            error!("🚫 Sistem kapatılıyor.");
             std::process::exit(1);
         }
         KernelStatus::Error(e) => warn!("🛡️ Kernel modül hatası: {}", e),
@@ -350,7 +350,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::thread::spawn(move || {
         let bpf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bpf").join("program.bpf.o");
-        let mut bpf = match Ebpf::load_file(&bpf_path) {
+        let mut bpf = match Bpf::load_file(&bpf_path) {
             Ok(b) => b,
             Err(e) => {
                 error!("Failed to load eBPF from {:?}: {:?}", bpf_path, e);
@@ -381,19 +381,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        let mut poll_buf = [0u8; 4096];
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
-                for event in buf.iter() {
-                    match event {
-                        Ok(event_data) => {
-                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event_data.data()) {
+                match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
+                    Ok(events) => {
+                        for event in events {
+                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
                                 let _ = ebpf_tx.blocking_send(evt);
                             }
                             read_any = true;
                         }
-                        Err(_) => {}
                     }
+                    Err(_) => {}
                 }
             }
             if !read_any {
@@ -405,7 +406,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let socket_path = "/tmp/anti-cheat.sock";
     tokio::spawn(async move {
         while let Some(evt) = ebpf_rx.recv().await {
-            warn!("️ eBPF: Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
+            warn!("⚠️ eBPF: Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
             report_suspicious_activity(evt.pid as u32, format!("Opened suspicious file: {}", evt.filename), socket_path).await;
         }
     });
