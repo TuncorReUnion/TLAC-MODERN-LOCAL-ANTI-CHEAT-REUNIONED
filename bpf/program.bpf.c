@@ -4,6 +4,18 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_tracing.h>
 
+struct suspicious_event {
+    int pid;
+    char filename[256];
+};
+
+struct bpf_map_def SEC("maps") suspicious_events = {
+    .type = BPF_MAP_TYPE_PERF_EVENT_ARRAY,
+    .key_size = sizeof(int),
+    .value_size = sizeof(struct suspicious_event),
+    .max_entries = 1024,
+};
+
 struct trace_event_raw_sys_enter {
     unsigned short common_type;
     unsigned char common_flags;
