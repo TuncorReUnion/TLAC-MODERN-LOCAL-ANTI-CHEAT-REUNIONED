@@ -1,5 +1,5 @@
 [package]
-name = "Anti-Cheat"
+name = "anti-cheat"        
 version = "3.0.0"
 edition = "2021"
 authors = ["TuncorReUnion"]
@@ -7,28 +7,29 @@ description = "TLAC - Tuncor's Local Anti-Cheat"
 license = "MIT"
 repository = "https://github.com/TuncorReUnion/TLAC-MODERN-LOCAL-ANTI-CHEAT-REUNIONED"
 
-[lib]
-name = "anti_cheat"
-path = "src/lib.rs"
-
 [[bin]]
-name = "Anti-Cheat"
+name = "anti-cheat"    
 path = "src/main.rs"
 
 [[bin]]
 name = "ac-server"
-path = "src/bin/server_main.rs"
+path = "src/bin/server_main.rs"   # ← DİKKAT: Bu dosya gerçekten var mı? Yoksa "src/ac-server.rs" yazmalısın
+
+[lib]
+name = "anti_cheat"
+path = "src/lib.rs"
 
 [dependencies]
-nix = { version = "0.31", features = ["process", "ptrace"] }
-procfs = "0.17"
-sha2 = "0.10"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-hex = "0.4"
 tokio = { version = "1", features = ["full"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
-chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.13.3", features = ["json"] }
-aya = "0.19"
-aya-log = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0"             
+sha2 = "0.10"
+rusqlite = { version = "0.31", features = ["bundled"] }
+nix = "0.29"
+procfs = "0.17"
+hex = "0.4"
+aya = { version = "0.19", optional = true }
+lazy_static = "1.4"           
+
+[dev-dependencies]
+anyhow = "1.0"
