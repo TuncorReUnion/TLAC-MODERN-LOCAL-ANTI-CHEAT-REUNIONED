@@ -1,0 +1,17 @@
+- name: Build Anti-Cheat Binary
+  run: cargo build --release
+
+- name: Generate bin_hash.txt
+  run: |
+    sha256sum target/release/anti-cheat | awk '{print $1}' > bin_hash.txt
+    echo "Generated hash:"
+    cat bin_hash.txt
+
+- name: Upload Artifacts
+  uses: actions/upload-artifact@v4
+  with:
+    name: tlac-release
+    path: |
+      target/release/anti-cheat
+      bin_hash.txt
+      bpf/program.bpf.o
