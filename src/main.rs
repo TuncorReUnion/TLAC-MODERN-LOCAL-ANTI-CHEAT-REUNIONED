@@ -32,38 +32,6 @@ struct AntiCheatConfig
     log_path: String,
 }
 
-tokio::spawn(async move {
-    match online_cpus() {
-        Ok(cpus) => {
-            for cpu in cpus {
-                if let Ok(mut events) = perf.open(cpu, None) {
-                    loop {
-                        match events.read_events(10, tokio::time::Duration::from_millis(100)) {
-                            Ok(batch) => {
-                                for event in batch {
-                                    if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(&event.data) {
-                                        warn!("⚠️ Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
-                                        // → Buraya ban komutu gönderilebilir
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                warn!("BPF event read error: {}", e);
-                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                            }
-                        }
-                    }
-                } else {
-                    warn!("Failed to open perf event for CPU {}", cpu);
-                }
-            }
-        }
-        Err(e) => {
-            error!("Failed to get online CPUs: {}", e);
-        }
-    }
-});
-
 fn load_config() -> Result<AntiCheatConfig, Box<dyn std::error::Error>>
 {
     let path = get_config_path();
@@ -425,6 +393,53 @@ fn is_hwid_banned(conn: &Connection, hwid: &str) -> std::result::Result<bool, Bo
 #[tokio::main]
 async fn main()
 {
+    tokio::spawn(async move {
+    match online_cpus() 
+        {
+        Ok(cpus) => 
+            {
+            for cpu in cpus 
+                {
+                if let Ok(mut events) = perf.open(cpu, None) 
+                {
+                    loop 
+                        {
+                        match events.read_events(10, tokio::time::Duration::from_millis(100)) 
+                            {
+                            Ok(batch) => 
+                                {
+                                for event in batch 
+                                    {
+                                    if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(&event.data) 
+                                    {
+                                        warn!("⚠️ Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
+                                        if let Ok(cmd) = serde_json::from_slice::<BanCommand>(&buf[..n]) 
+                                        {
+                                             match cmd {
+                        BanCommand::Ban { hwid } => 
+                            {
+                            warn!("🚨 BAN RECEIVED for HWID: {}", hwid);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("BPF event read error: {}", e);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                            }
+                        }
+                    }
+                } else {
+                    warn!("Failed to open perf event for CPU {}", cpu);
+                }
+            }
+        }
+        Err(e) => {
+            error!("Failed to get online CPUs: {}", e);
+        }
+    }
+    }
+    }
+                 
     let mut bpf = Bpf::load(include_bytes!("../bpf/program.bpf.o"))?;
     let perf = bpf.take_table::<PerfEventArray<_>>("suspicious_events")?;
     let hwid = generate_hwid();
