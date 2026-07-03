@@ -1,71 +1,80 @@
-use tokio::net::{UnixListener, UnixStream};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::net::UnixListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use serde_json;
-use crate::messages::{AntiCheatMessage, BanType};
-use std::collections::HashSet;
+use log::{info, warn, error};
 
-pub struct AntiCheatServer {
-    socket_path: String,
-    #[allow(dead_code)]
-    banned_pids: HashSet<u32>,
+use crate::messages::{AntiCheatMessage, BanCommand};
+
+pub struct ServerState {
+    pub banned_hwids: Arc<Mutex<HashMap<String, String>>>,
 }
 
-impl AntiCheatServer {
-    pub fn new(socket_path: &str) -> Self {
-        Self {
-            socket_path: socket_path.to_string(),
-            banned_pids: HashSet::new(),
+impl ServerState {
+    pub fn new() -> Self {
+        ServerState {
+            banned_hwids: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+}
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let _ = std::fs::remove_file(&self.socket_path);
-
-        let listener = UnixListener::bind(&self.socket_path)?;
-        println!("🔌 Server listening on {}", self.socket_path);
-
-        loop {
-            let (stream, _) = listener.accept().await?;
-            tokio::spawn(Self::handle_client(stream));
-        }
+pub async fn run_server(socket_path: &str, state: Arc<ServerState>) -> Result<(), Box<dyn std::error::Error>> {
+    if std::path::Path::new(socket_path).exists() {
+        std::fs::remove_file(socket_path)?;
     }
 
-    async fn handle_client(mut stream: UnixStream) {
-        let mut buf = [0u8; 4096];
-        
-        loop {
-            let n = match stream.read(&mut buf).await {
-                Ok(0) => break,  
-                Ok(n) => n,
-                Err(e) => {
-                    eprintln!("❌ Read error: {}", e);
-                    break;
-                }
-            };
+    let listener = UnixListener::bind(socket_path)?;
+    info!("🚀 Anti-Cheat Server listening on {}", socket_path);
 
-            if let Ok(msg) = serde_json::from_slice::<AntiCheatMessage>(&buf[..n]) {
-                match msg {
-                    AntiCheatMessage::Heartbeat { pid, timestamp } => {
-                        println!("💓 Heartbeat from PID {} at {}", pid, timestamp);
-                        let ack = AntiCheatMessage::Ack { message: "OK".to_string() };
-                        let _ = stream.write_all(&serde_json::to_vec(&ack).unwrap()).await;
+    loop {
+        match listener.accept().await {
+            Ok((mut stream, _addr)) => {
+                let state_clone = state.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut buf).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                if let Ok(msg) = serde_json::from_slice::<AntiCheatMessage>(&buf[..n]) {
+                                    match msg {
+                                        AntiCheatMessage::Heartbeat { hwid, pid, timestamp } => {
+                                            info!("💓 Heartbeat from HWID: {} (PID: {}) at {}", hwid, pid, timestamp);
+                                            
+                                            let bans = state_clone.banned_hwids.lock().unwrap();
+                                            if bans.contains_key(&hwid) {
+                                                let reason = bans.get(&hwid).cloned().unwrap_or_else(|| "Unknown".to_string());
+                                                drop(bans);
+                                                
+                                                let ban_cmd = BanCommand::Ban { hwid: hwid.clone() };
+                                                if let Ok(json) = serde_json::to_vec(&ban_cmd) {
+                                                    if let Err(e) = stream.write_all(&json).await {
+                                                        error!("Failed to send BanCommand: {}", e);
+                                                    } else {
+                                                        warn!("🚨 Sent BanCommand to HWID: {} (Reason: {})", hwid, reason);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        AntiCheatMessage::SuspiciousActivity { pid, reason, memory_address, signature_found } => {
+                                            warn!("⚠️ Suspicious Activity reported for PID {}: {} (Addr: {:?}, Sig: {:?})", 
+                                                  pid, reason, memory_address, signature_found);
+                                        }
+                                    }
+                                } else {
+                                    warn!("Received invalid JSON message");
+                                }
+                            }
+                            Err(e) => {
+                                error!("Socket read error: {}", e);
+                                break;
+                            }
+                        }
                     }
-                    AntiCheatMessage::SuspiciousActivity { pid, reason, .. } => {
-                        println!("⚠️ Suspicious activity from PID {}: {}", pid, reason);
-                        let ban_cmd = AntiCheatMessage::BanCommand {
-                            pid,
-                            ban_type: BanType::Permanent,
-                            reason: format!("Cheat detected: {}", reason),
-                        };
-                        let _ = stream.write_all(&serde_json::to_vec(&ban_cmd).unwrap()).await;
-                    }
-                    AntiCheatMessage::BanCommand { pid, ban_type, reason } => {
-                        println!("🚫 Banning PID {} ({:?}): {}", pid, ban_type, reason);
-                    }
-                    AntiCheatMessage::Ack { message } => {
-                        println!("✅ Ack: {}", message);
-                    }
-                }
+                });
+            }
+            Err(e) => {
+                error!("Failed to accept connection: {}", e);
             }
         }
     }
