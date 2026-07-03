@@ -13,13 +13,14 @@ use nix::unistd::Pid;
 use procfs::process::Process;
 use hex;
 use log::{warn, error};
-
+use aya::maps::perf::PerfEventArray;
+use std::thread;
+use std::time::Duration;
 use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
 
 use aya::Ebpf;
 use aya::util::online_cpus;
-use aya::maps::perf::PerfEventArray;
 
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
@@ -423,15 +424,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("✅ HWID temiz: {}", hwid);
 
-    // --- Spawn eBPF listener ---
-    tokio::spawn(async move {
-        let mut bpf = match Ebpf::load(include_bytes!("../bpf/program.bpf.o")) {
-            Ok(b) => b,
-            Err(e) => {
-                error!("Failed to load eBPF: {}", e);
-                return;
-            }
-        };
+    thread::spawn(move || {
+    // PerfEventArray'i aya 0.14 API'sine göre al
+    let mut perf = match PerfEventArray::try_from(bpf.take_map("suspicious_events").unwrap()) {
+        Ok(p) => p,
+        Err(e) => {
+            log::error!("Failed to create PerfEventArray: {:?}", e);
+            return;
+        }
+    };
+
+        for cpu in aya::util::online_cpus().unwrap_or_default() {
+        if let Err(e) = perf.open(cpu, None) {
+            log::warn!("Failed to open perf buffer for CPU {}: {:?}", cpu, e);
+        }
+    }
+
 
         let mut perf: PerfEventArray<_> = match bpf.take_map("suspicious_events") {
     Some(map) => match PerfEventArray::try_from(map) {
