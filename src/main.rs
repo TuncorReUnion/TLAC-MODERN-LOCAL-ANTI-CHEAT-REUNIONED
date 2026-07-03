@@ -24,7 +24,6 @@ use aya::util::online_cpus;
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
 
-// ✅ GÜVENLİK DÜZELTMESİ: Hash artık config'den değil, compile-time embed edilmiş sabitten gelir
 const EMBEDDED_BINARY_HASH: &str = include_str!("../bin_hash.txt");
 
 #[derive(Deserialize, Debug)]
@@ -283,13 +282,36 @@ async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str)
     }
 }
 
+fn get_embedded_hash() -> &'static str {
+    // İlk derlemede dosya yoksa boş döner, release build'te CI tarafından güncellenir
+    include_str!("../bin_hash.txt")
+}
+
+fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
+    let expected = get_embedded_hash().trim();
+    
+    if expected.is_empty() {
+        warn!("⚠️ Binary hash embed edilmemiş (ilk derleme). Integrity check atlanıyor.");
+        return Ok(());
+    }
+
+    let current_hash = calculate_binary_hash()?;
+    if current_hash != expected {
+        return Err(format!(
+            "!!! BINARY TAMPERING DETECTED!\nExpected: {}\nGot: {}",
+            expected, current_hash
+        ).into());
+    }
+    info!("✅ Binary integrity verified.");
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    // ✅ GÜVENLİK DÜZELTMESİ: Config'den hash okuma kaldırıldı, sadece embed kontrolü yapılıyor
     if let Err(e) = verify_binary_integrity() {
-        error!(" KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
+        error!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
         std::process::exit(1);
     }
 
@@ -345,7 +367,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (ebpf_tx, mut ebpf_rx) = mpsc::channel::<SuspiciousEvent>(100);
 
-    // ✅ SÖZDİZİMİ DÜZELTMESİ: Tekrarlanan hatalı kod bloğu tamamen silindi
     std::thread::spawn(move || {
         let bpf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bpf").join("program.bpf.o");
         let mut bpf = match Ebpf::load_file(&bpf_path) {
