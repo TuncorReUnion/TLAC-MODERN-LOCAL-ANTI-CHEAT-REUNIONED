@@ -18,7 +18,7 @@ use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
 
 use aya::Ebpf;
-use aya::maps::perf::PerfEventArrayBuffer;
+use aya::maps::PerfEventArray;
 use aya::util::online_cpus;
 
 mod proc_status;
@@ -122,57 +122,6 @@ fn init_db() -> Result<Connection, Box<dyn std::error::Error>> {
     )?;
     Ok(conn)
 }
-
-    std::thread::spawn(move || {
-        let bpf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bpf").join("program.bpf.o");
-        let mut bpf = match Ebpf::load_file(&bpf_path) {
-            Ok(b) => b,
-            Err(e) => {
-                error!("Failed to load eBPF from {:?}: {:?}", bpf_path, e);
-                return;
-            }
-        };
-
-        let map = match bpf.take_map("suspicious_events") {
-            Some(m) => m,
-            None => {
-                error!("eBPF map 'suspicious_events' not found");
-                return;
-            }
-        };
-
-        // ✅ aya 0.14: PerfEventArray kullanılır, Buffer değil
-        let mut perf = match aya::maps::PerfEventArray::try_from(map) {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Failed to create PerfEventArray: {:?}", e);
-                return;
-            }
-        };
-
-        for cpu in online_cpus().unwrap_or_default() {
-            if let Err(e) = perf.open(cpu, None) {
-                warn!("Failed to open perf buffer for CPU {}: {:?}", cpu, e);
-            }
-        }
-
-        let mut buf = [0u8; 4096];
-        loop {
-            match perf.read_events(&mut buf, Duration::from_millis(100)) {
-                Ok(events) => {
-                    for event in events {
-                        if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
-                            let _ = ebpf_tx.blocking_send(evt);
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("BPF read error: {:?}", e);
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-            }
-        }
-    });
 
 fn ban_hwid(conn: &Connection, hwid: &str, reason: &str) -> Result<(), rusqlite::Error> {
     conn.execute(
@@ -419,10 +368,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let mut perf: PerfEventArrayBuffer<_> = match PerfEventArrayBuffer::try_from(map) {
+        let mut perf = match PerfEventArray::try_from(map) {
             Ok(p) => p,
             Err(e) => {
-                error!("Failed to create PerfEventArrayBuffer: {:?}", e);
+                error!("Failed to create PerfEventArray: {:?}", e);
                 return;
             }
         };
@@ -433,18 +382,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        let mut buf = [0u8; 4096];
         loop {
-            match perf.next() {
-                Some(Ok(event)) => {
-                    if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
-                        let _ = ebpf_tx.blocking_send(evt);
+            match perf.read_events(&mut buf, Duration::from_millis(100)) {
+                Ok(events) => {
+                    for event in events {
+                        if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
+                            let _ = ebpf_tx.blocking_send(evt);
+                        }
                     }
                 }
-                Some(Err(e)) => {
+                Err(e) => {
                     warn!("BPF read error: {:?}", e);
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                None => {
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
