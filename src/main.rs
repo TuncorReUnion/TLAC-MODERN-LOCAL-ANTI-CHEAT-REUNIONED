@@ -24,6 +24,9 @@ use aya::util::online_cpus;
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
 
+// ✅ GÜVENLİK DÜZELTMESİ: Hash artık config'den değil, compile-time embed edilmiş sabitten gelir
+const EMBEDDED_BINARY_HASH: &str = include_str!("../bin_hash.txt");
+
 #[derive(Deserialize, Debug)]
 struct SuspiciousEvent {
     pid: i32,
@@ -73,16 +76,16 @@ fn calculate_binary_hash() -> Result<String, Box<dyn std::error::Error>> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-fn verify_binary_integrity(expected_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if expected_hash.is_empty() {
-        warn!("⚠️ Binary hash boş, integrity check atlanıyor");
+fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
+    if EMBEDDED_BINARY_HASH.trim().is_empty() {
+        warn!("️ Binary hash embed edilmemiş, integrity check atlanıyor");
         return Ok(());
     }
     let current_hash = calculate_binary_hash()?;
-    if current_hash != expected_hash {
+    if current_hash != EMBEDDED_BINARY_HASH.trim() {
         return Err(format!(
             "!!! BINARY TAMPERING DETECTED!\nExpected: {}\nGot: {}",
-            expected_hash, current_hash
+            EMBEDDED_BINARY_HASH.trim(), current_hash
         ).into());
     }
     info!("✅ Binary integrity verified.");
@@ -284,23 +287,15 @@ async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str)
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let config_path = get_config_path();
-    let expected_hash = if config_path.exists() {
-        let content = fs::read_to_string(&config_path).unwrap_or_default();
-        let v: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
-        v["expected_binary_hash"].as_str().unwrap_or("").to_string()
-    } else {
-        String::new()
-    };
-
-    if let Err(e) = verify_binary_integrity(&expected_hash) {
-        error!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
+    // ✅ GÜVENLİK DÜZELTMESİ: Config'den hash okuma kaldırıldı, sadece embed kontrolü yapılıyor
+    if let Err(e) = verify_binary_integrity() {
+        error!(" KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
         std::process::exit(1);
     }
 
     let pid: u32 = std::env::args()
         .nth(1)
-        .expect("❌ Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
+        .expect(" Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
         .parse()
         .expect("❌ Hata: PID geçerli bir sayı olmalı!");
 
@@ -350,7 +345,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (ebpf_tx, mut ebpf_rx) = mpsc::channel::<SuspiciousEvent>(100);
 
-        std::thread::spawn(move || {
+    // ✅ SÖZDİZİMİ DÜZELTMESİ: Tekrarlanan hatalı kod bloğu tamamen silindi
+    std::thread::spawn(move || {
         let bpf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bpf").join("program.bpf.o");
         let mut bpf = match Ebpf::load_file(&bpf_path) {
             Ok(b) => b,
@@ -386,7 +382,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
-                // aya 0.14 iterator API'si
                 for event in buf.iter() {
                     match event {
                         Ok(event_data) => {
@@ -403,44 +398,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !read_any {
                 std::thread::sleep(Duration::from_millis(100));
             }
-        }
-    });
-
-let mut poll_buf = [0u8; 4096];
-loop {
-    let mut read_any = false;
-    for buf in &mut buffers {
-                let mut buffers = Vec::new();
-        for cpu in online_cpus().unwrap_or_default() {
-            if let Ok(buf) = perf.open(cpu, None) {
-                buffers.push(buf);
-            }
-        }
-
-        loop {
-            let mut read_any = false;
-            for buf in &mut buffers {
-                for event in buf.iter() {
-                    match event {
-                        Ok(event_data) => {
-                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event_data.data()) {
-                                let _ = ebpf_tx.blocking_send(evt);
-                            }
-                            read_any = true;
-                        }
-                        Err(_) => {}
-                    }
-                }
-            }
-            if !read_any {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-    if !read_any {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
         }
     });
 
@@ -468,7 +425,7 @@ loop {
                     if let Ok(cmd) = serde_json::from_slice::<BanCommand>(&buf[..n]) {
                         match cmd {
                             BanCommand::Ban { hwid } => {
-                                warn!("🚨 BAN RECEIVED for HWID: {}", hwid);
+                                warn!(" BAN RECEIVED for HWID: {}", hwid);
                                 let conn = match Connection::open("/var/lib/tlac/anti_cheat.db") {
                                     Ok(c) => c,
                                     Err(e) => {
