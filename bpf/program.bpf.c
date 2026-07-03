@@ -55,7 +55,11 @@ int trace_openat(struct trace_event_raw_sys_enter *args) {
     char filename[256];
     bpf_probe_read_user_str(filename, sizeof(filename), (void *)args->args[1]);
     if (is_suspicious_file(filename)) {
-    }
+    struct suspicious_event evt = {};
+    evt.pid = bpf_get_current_pid_tgid() >> 32;
+    bpf_strncpy(evt.filename, filename, sizeof(evt.filename));
+    bpf_perf_event_output(args, &suspicious_events, BPF_F_CURRENT_CPU, &evt, sizeof(evt));
+}
     return 0;
 }    
 
