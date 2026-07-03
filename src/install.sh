@@ -1,124 +1,114 @@
 #!/bin/bash
-#
-# TLAC v3.0 - Installer
-# TuncorReUnion - 2026
-#
 
-set -e
+# ==============================================================================
+# TLAC (Tuncor's Local Anti-Cheat) v4.0 Installer
+# Description: Installs the anti-cheat binary, configuration files, and kernel module.
+# License: MIT
+# ==============================================================================
 
+set -e # Exit immediately if a command exits with a non-zero status.
+
+# --- Configuration ---
+INSTALL_DIR="/opt/tlac"
+BIN_NAME="anti-cheat"
+CONFIG_DIR="/etc/tlac"
+DB_PATH="/var/lib/tlac/anti_cheat.db"
+SERVICE_NAME="tlac.service"
+KERNEL_MODULE="tlac_kernel.ko"
+
+# --- Colors for Output ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
-print_status() { echo -e "${BLUE}[*]${NC} $1"; }
-print_success() { echo -e "${GREEN}[+]${NC} $1"; }
-print_error() { echo -e "${RED}[!]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[⚠]${NC} $1"; }
+log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
-if [ "$EUID" -ne 0 ]; then 
-    print_error "This script must be run with root privileges!"
-    echo "Usage: sudo ./install.sh"
-    exit 1
+# --- Root Check ---
+if [ "$(id -u)" -ne 0 ]; then
+    log_error "This script must be run as root. Please use 'sudo ./install.sh'"
 fi
 
-KERNEL_VERSION=$(uname -r)
-BIN_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/tlac"
-MODULE_DIR="/lib/modules/${KERNEL_VERSION}/extra"
-BPF_DIR="/usr/lib/tlac/bpf"
+# --- 1. Install System Dependencies ---
+log_info "Installing system dependencies..."
+if command -v apt-get &> /dev/null; then
+    apt-get update -qq
+    apt-get install -y -qq build-essential libssl-dev pkg-config linux-headers-$(uname -r) > /dev/null
+elif command -v dnf &> /dev/null; then
+    dnf install -y make gcc openssl-devel pkg-config kernel-devel-$(uname -r) > /dev/null
+else
+    log_warn "Package manager not detected. Please ensure 'build-essential', 'libssl-dev', and kernel headers are installed manually."
+fi
 
-print_status "TLAC v3.0 Installation started..."
-print_status "Kernel: ${KERNEL_VERSION}"
-
-mkdir -p "$BIN_DIR"
+# --- 2. Create Directory Structure ---
+log_info "Creating directory structure..."
+mkdir -p "$INSTALL_DIR"
 mkdir -p "$CONFIG_DIR"
-mkdir -p "$MODULE_DIR"
-mkdir -p "$BPF_DIR"
+mkdir -p "$(dirname "$DB_PATH")"
 
-# ============================================
-# 1. MAIN BINARY
-# ============================================
-if [ -f "Anti-Cheat" ]; then
-    cp Anti-Cheat "$BIN_DIR/tlac"
-    chmod +x "$BIN_DIR/tlac"
-    print_success "Anti-Cheat -> $BIN_DIR/tlac"
-else
-    print_error "Anti-Cheat binary not found!"
-    exit 1
+# --- 3. Install Binary & Configs ---
+log_info "Installing binary to $INSTALL_DIR..."
+if [ ! -f "$BIN_NAME" ]; then
+    log_error "Binary '$BIN_NAME' not found in current directory. Please run this script from the release folder."
 fi
+cp "$BIN_NAME" "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/$BIN_NAME"
 
-# ============================================
-# 2. SERVER BINARY
-# ============================================
-if [ -f "ac-server" ]; then
-    cp ac-server "$BIN_DIR/ac-server"
-    chmod +x "$BIN_DIR/ac-server"
-    print_success "ac-server -> $BIN_DIR/ac-server"
-else
-    print_warning "ac-server not found (optional)"
-fi
-
-# ============================================
-# 3. CONFIGURATION
-# ============================================
-if [ -f "signatures.json" ]; then
-    cp signatures.json "$CONFIG_DIR/"
-    print_success "signatures.json -> $CONFIG_DIR/"
-else
-    print_warning "signatures.json not found"
-fi
-
-# ============================================
-# 4. KERNEL MODULE (from kernel/ folder)
-# ============================================
-if [ -f "kernel/tlac_kernel.ko" ]; then
-    cp kernel/tlac_kernel.ko "$MODULE_DIR/"
-    print_success "tlac_kernel.ko -> $MODULE_DIR/"
-
-    print_status "Loading kernel module..."
-    if lsmod | grep -q "^tlac_kernel"; then
-        rmmod tlac_kernel 2>/dev/null
-    fi
-    insmod "$MODULE_DIR/tlac_kernel.ko" 2>/dev/null
-    if lsmod | grep -q "^tlac_kernel"; then
-        print_success "Kernel module loaded successfully!"
+# Install default signatures if not present
+if [ ! -f "$CONFIG_DIR/signatures.json" ]; then
+    log_info "Installing default signature database..."
+    if [ -f "signatures.json" ]; then
+        cp "signatures.json" "$CONFIG_DIR/"
     else
-        print_warning "Failed to load kernel module (check dmesg)"
+        log_warn "signatures.json not found. You will need to create one manually at $CONFIG_DIR/signatures.json"
     fi
+fi
+
+# --- 4. Kernel Module (Optional) ---
+if [ -f "$KERNEL_MODULE" ]; then
+    log_info "Installing kernel module..."
+    cp "$KERNEL_MODULE" "/lib/modules/$(uname -r)/extra/"
+    depmod -a
+    modprobe tlac_kernel || log_warn "Failed to load kernel module. It may require a reboot or specific kernel config."
 else
-    print_warning "kernel/tlac_kernel.ko not found (module skipped)"
+    log_warn "Kernel module ($KERNEL_MODULE) not found. Skipping kernel-level protection."
 fi
 
-# ============================================
-# 5. eBPF PROGRAM (from bpf/ folder)
-# ============================================
-if [ -f "bpf/program.bpf.o" ]; then
-    cp bpf/program.bpf.o "$BPF_DIR/"
-    print_success "program.bpf.o -> $BPF_DIR/"
-else
-    print_warning "bpf/program.bpf.o not found (eBPF skipped)"
-fi
+# --- 5. Systemd Service Setup ---
+log_info "Setting up systemd service..."
+cat > /etc/systemd/system/$SERVICE_NAME <<EOF
+[Unit]
+Description=TLAC Local Anti-Cheat Daemon
+After=network.target
 
-# ============================================
-# 6. POST-INSTALLATION CHECK
-# ============================================
-if [ -f "/proc/tlac_status" ]; then
-    print_success "/proc/tlac_status is active!"
-    cat /proc/tlac_status
-fi
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/$BIN_NAME --daemon
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
 
-print_success "TLAC v3.0 installation completed!"
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable $SERVICE_NAME
+
+# --- Completion ---
 echo ""
-echo "📦 Usage:"
-echo "  sudo tlac <PID>"
-echo "  sudo ac-server"
-echo "  cat /proc/tlac_status"
-echo ""
-echo "📁 File locations:"
-echo "  Main Binary:   $BIN_DIR/tlac"
-echo "  Server:        $BIN_DIR/ac-server"
-echo "  Config:        $CONFIG_DIR/signatures.json"
-echo "  Kernel Module: $MODULE_DIR/tlac_kernel.ko"
-echo "  eBPF:          $BPF_DIR/program.bpf.o"
+log_info "============================================"
+log_info " TLAC v4.0 Installation Complete!"
+log_info "============================================"
+log_info " Binary Location : $INSTALL_DIR/$BIN_NAME"
+log_info " Config Dir      : $CONFIG_DIR"
+log_info " Database Path   : $DB_PATH"
+log_info ""
+log_info "To start the service:"
+echo "  sudo systemctl start $SERVICE_NAME"
+log_info "To check logs:"
+echo "  journalctl -u $SERVICE_NAME -f"
+log_info "============================================"
