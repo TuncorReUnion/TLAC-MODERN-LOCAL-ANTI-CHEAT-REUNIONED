@@ -1,21 +1,24 @@
-use anti_cheat::messages::AntiCheatMessage;
-use anti_cheat::sync_client::SyncClient;
+use std::env;
+use std::path::PathBuf;
+use std::time::Duration as StdDuration;
 use tokio::net::UnixStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::{sleep, Duration};
 use rusqlite::Connection;
 use sha2::{Sha256, Digest};
 use serde::{Deserialize, Serialize};
 use nix::sys::ptrace;
 use nix::unistd::Pid;
 use procfs::process::Process;
-use std::env;
-use std::time::Duration;
 use hex;
-use proc_status::{read_kernel_status, KernelStatus};
-use std::fs;
-use std::path::PathBuf;
-
+use anti_cheat::messages::AntiCheatMessage;
+use anti_cheat::sync_client::SyncClient;
+use aya::Bpf;
+use aya::util::online_cpus;
+use aya::maps::perf::PerfEventArray;
+use aya::programs::TracePoint;
 mod proc_status;
+use proc_status::{read_kernel_status, KernelStatus};
 mod messages;
 mod sync_client;
 
