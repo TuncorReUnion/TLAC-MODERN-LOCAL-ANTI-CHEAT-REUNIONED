@@ -52,6 +52,9 @@ fn load_config() -> Result<AntiCheatConfig, Box<dyn std::error::Error>>
     Ok(config)
 }
 
+let status = proc_status::read_kernel_status();
+println!("{:?}", status);
+
 fn default_interval() -> u64 { 5000 }
 
 fn get_config_path() -> PathBuf
