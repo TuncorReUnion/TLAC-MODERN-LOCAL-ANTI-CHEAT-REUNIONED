@@ -292,13 +292,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     if let Err(e) = verify_binary_integrity() {
-        error!(" KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
+        error!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
         std::process::exit(1);
     }
 
     let pid: u32 = std::env::args()
         .nth(1)
-        .expect(" Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
+        .expect("❌ Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
         .parse()
         .expect("❌ Hata: PID geçerli bir sayı olmalı!");
 
@@ -381,20 +381,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let mut poll_buf = [0u8; 4096];
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
-                match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
-                    Ok(events) => {
-                        for event in events {
-                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
+                // ✅ aya 0.14.0: Buffer doğrudan iterator olarak kullanılır
+                for event in buf {
+                    match event {
+                        Ok(event_data) => {
+                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event_data.data()) {
                                 let _ = ebpf_tx.blocking_send(evt);
                             }
                             read_any = true;
                         }
+                        Err(_) => {}
                     }
-                    Err(_) => {}
                 }
             }
             if !read_any {
@@ -450,7 +450,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    info!(" Process {} izlenmeye başlandı...", pid);
+    info!("🎯 Process {} izlenmeye başlandı...", pid);
 
     loop {
         match scan_all_signatures(pid).await {
