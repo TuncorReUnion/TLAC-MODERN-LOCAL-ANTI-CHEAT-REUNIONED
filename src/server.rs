@@ -41,7 +41,6 @@ pub async fn run_server(socket_path: &str, state: Arc<ServerState>) -> Result<()
                                         AntiCheatMessage::Heartbeat { hwid, pid, timestamp } => {
                                             info!("💓 Heartbeat from HWID: {} (PID: {}) at {}", hwid, pid, timestamp);
                                             
-                                            // ✅ KİLİT SADECE BURADA TUTULUYOR VE .AWAIT ÖNCESİ BIRAKILIYOR
                                             let ban_reason = {
                                                 let bans = state_clone.banned_hwids.lock().unwrap();
                                                 bans.get(&hwid).cloned()
