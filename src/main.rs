@@ -384,8 +384,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
-                // ✅ aya 0.14.0: Buffer doğrudan iterator olarak kullanılır
-                for event in buf {
+                for event in buf.iter() {
                     match event {
                         Ok(event_data) => {
                             if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event_data.data()) {
@@ -396,7 +395,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Err(_) => {}
                     }
                 }
-            }
             if !read_any {
                 std::thread::sleep(Duration::from_millis(100));
             }
