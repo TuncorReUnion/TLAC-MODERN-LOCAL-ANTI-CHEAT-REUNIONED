@@ -17,14 +17,12 @@ use log::{warn, error, info};
 use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
 
-use aya::Bpf;
-use aya::maps::perf::PerfEventArray;
+use aya::Ebpf;
+use aya::maps::perf::PerfEventArrayBuffer;
 use aya::util::online_cpus;
 
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
-
-const EMBEDDED_BINARY_HASH: &str = env!("TLAC_BINARY_HASH");
 
 #[derive(Deserialize, Debug)]
 struct SuspiciousEvent {
@@ -57,7 +55,6 @@ fn get_config_path() -> PathBuf {
     if let Ok(path) = env::var("TLAC_CONFIG") {
         return PathBuf::from(path);
     }
-
     let home_dir = if let Ok(user) = env::var("SUDO_USER") {
         PathBuf::from("/home").join(user)
     } else {
@@ -65,7 +62,6 @@ fn get_config_path() -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("/root"))
     };
-
     home_dir.join(".config").join("tlac").join("config.json")
 }
 
@@ -74,16 +70,19 @@ fn calculate_binary_hash() -> Result<String, Box<dyn std::error::Error>> {
     let content = fs::read(exe_path)?;
     let mut hasher = Sha256::new();
     hasher.update(&content);
-    let result = hasher.finalize();
-    Ok(hex::encode(result))
+    Ok(hex::encode(hasher.finalize()))
 }
 
-fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
+fn verify_binary_integrity(expected_hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if expected_hash.is_empty() {
+        warn!("⚠️ Binary hash boş, integrity check atlanıyor");
+        return Ok(());
+    }
     let current_hash = calculate_binary_hash()?;
-    if current_hash != EMBEDDED_BINARY_HASH {
+    if current_hash != expected_hash {
         return Err(format!(
             "!!! BINARY TAMPERING DETECTED!\nExpected: {}\nGot: {}",
-            EMBEDDED_BINARY_HASH, current_hash
+            expected_hash, current_hash
         ).into());
     }
     info!("✅ Binary integrity verified.");
@@ -92,21 +91,17 @@ fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
 
 fn generate_hwid() -> String {
     let mut hasher = Sha256::new();
-
     if let Ok(uuid) = fs::read_to_string("/sys/class/dmi/id/product_uuid") {
         hasher.update(uuid.trim());
     }
-
     if let Ok(mac) = fs::read_to_string("/sys/class/net/eth0/address") {
         hasher.update(mac.trim());
     } else if let Ok(mac) = fs::read_to_string("/sys/class/net/wlan0/address") {
         hasher.update(mac.trim());
     }
-
     if let Ok(serial) = fs::read_to_string("/sys/block/sda/device/serial") {
         hasher.update(serial.trim());
     }
-
     format!("{:x}", hasher.finalize())
 }
 
@@ -115,7 +110,6 @@ fn init_db() -> Result<Connection, Box<dyn std::error::Error>> {
     if let Some(parent) = std::path::Path::new(db_path).parent() {
         std::fs::create_dir_all(parent)?;
     }
-
     let conn = Connection::open(db_path)?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS hwid_bans (
@@ -126,7 +120,6 @@ fn init_db() -> Result<Connection, Box<dyn std::error::Error>> {
         )",
         [],
     )?;
-
     Ok(conn)
 }
 
@@ -151,7 +144,6 @@ fn parse_pattern(pattern_str: &str) -> Vec<Option<u8>> {
     if pattern_str.trim().is_empty() {
         return Vec::new();
     }
-
     pattern_str.split_whitespace()
         .filter_map(|byte| {
             if byte == "?" || byte == "*" {
@@ -174,16 +166,12 @@ const MAX_REGION_SIZE: usize = 256 * 1024 * 1024;
 
 fn read_memory_range(pid: u32, start: usize, len: usize) -> nix::Result<Vec<u8>> {
     if len == 0 || len > MAX_REGION_SIZE {
-        warn!("⚠️ Bölge atlandı: start={:#x}, len={} (max: {})", start, len, MAX_REGION_SIZE);
         return Ok(Vec::new());
     }
-
     let mut data = Vec::with_capacity(len.min(MAX_REGION_SIZE));
     let pid_nix = Pid::from_raw(pid as i32);
-
     for offset in (0..len).step_by(4) {
         if offset >= MAX_REGION_SIZE { break; }
-
         let addr = (start + offset) as *mut std::ffi::c_void;
         match ptrace::read(pid_nix, addr) {
             Ok(word) => data.extend_from_slice(&word.to_ne_bytes()),
@@ -194,28 +182,13 @@ fn read_memory_range(pid: u32, start: usize, len: usize) -> nix::Result<Vec<u8>>
 }
 
 fn search_wildcard_pattern_in_bytes(bytes: &[u8], pattern: &[Option<u8>]) -> Option<usize> {
-    if pattern.is_empty() || bytes.is_empty() {
+    if pattern.is_empty() || bytes.is_empty() || pattern.len() > bytes.len() {
         return None;
     }
-
-    let pat_len = pattern.len();
-    let bytes_len = bytes.len();
-
-    if pat_len > bytes_len {
-        return None;
-    }
-
-    let max_start_index = bytes_len - pat_len;
-
+    let max_start_index = bytes.len() - pattern.len();
     for i in 0..=max_start_index {
         let mut matched = true;
-
-        for j in 0..pat_len {
-            if i + j >= bytes_len {
-                matched = false;
-                break;
-            }
-
+        for j in 0..pattern.len() {
             if let Some(expected_byte) = pattern[j] {
                 if bytes[i + j] != expected_byte {
                     matched = false;
@@ -223,7 +196,6 @@ fn search_wildcard_pattern_in_bytes(bytes: &[u8], pattern: &[Option<u8>]) -> Opt
                 }
             }
         }
-
         if matched {
             return Some(i);
         }
@@ -248,11 +220,9 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
             return Ok(Vec::new());
         }
     };
-
     let mut found = Vec::new();
     let proc = Process::new(pid as i32)?;
     let pid_nix = Pid::from_raw(pid as i32);
-
     match ptrace::attach(pid_nix) {
         Ok(_) => {}
         Err(e) => {
@@ -260,18 +230,13 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
             return Err(format!("ptrace_attach_failed: {}", e).into());
         }
     }
-
     for map in proc.maps()? {
         let region_size = map.address.1 - map.address.0;
-
         if region_size == 0 || region_size > MAX_REGION_SIZE as u64 {
-            warn!("⚠️ Büyük bölge atlandı: {:#x}-{:#x}", map.address.0, map.address.1);
             continue;
         }
-
         let is_exec = map.perms.contains(procfs::process::MMPermissions::EXECUTE);
         let is_writable = map.perms.contains(procfs::process::MMPermissions::WRITE);
-
         for sig in &sigs {
             let should_scan = sig.memory_regions.iter().any(|r| match r.to_lowercase().as_str() {
                 "executable" => is_exec,
@@ -279,16 +244,10 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
                 _ => true,
             });
             if !should_scan { continue; }
-
             let pattern = parse_pattern(&sig.pattern);
-            if pattern.is_empty() {
-                warn!("⚠️ Boş pattern atlandı: {}", sig.name);
-                continue;
-            }
-
+            if pattern.is_empty() { continue; }
             let start = map.address.0 as usize;
             let len = region_size as usize;
-
             if let Some(offset) = search_wildcard_pattern_in_memory(pid, start, len, &pattern) {
                 found.push(FoundCheat {
                     name: sig.name.clone(),
@@ -298,10 +257,7 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
             }
         }
     }
-
-    if let Err(e) = ptrace::detach(pid_nix, None) {
-        warn!("⚠️ ptrace detach failed for PID {}: {}", pid, e);
-    }
+    let _ = ptrace::detach(pid_nix, None);
     Ok(found)
 }
 
@@ -328,7 +284,16 @@ async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str)
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    if let Err(e) = verify_binary_integrity() {
+    let config_path = get_config_path();
+    let expected_hash = if config_path.exists() {
+        let content = fs::read_to_string(&config_path).unwrap_or_default();
+        let v: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
+        v["expected_binary_hash"].as_str().unwrap_or("").to_string()
+    } else {
+        String::new()
+    };
+
+    if let Err(e) = verify_binary_integrity(&expected_hash) {
         error!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
         std::process::exit(1);
     }
@@ -361,7 +326,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let local_count: u32 = conn.query_row(
         "SELECT COUNT(*) FROM hwid_bans", [], |row| row.get(0)
     ).unwrap_or(0);
-    
+
     let sync_client = SyncClient::new("http://127.0.0.1:5000");
     match sync_client.sync_bans(&hwid, local_count).await {
         Ok(sync_data) => {
@@ -373,9 +338,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
-        Err(e) => {
-            warn!("⚠️ Sync başarısız, yerel veritabanı kullanılıyor: {}", e);
-        }
+        Err(e) => warn!("⚠️ Sync başarısız, yerel veritabanı kullanılıyor: {}", e),
     }
 
     if is_hwid_banned(&conn, &hwid)? {
@@ -388,10 +351,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ebpf_tx, mut ebpf_rx) = mpsc::channel::<SuspiciousEvent>(100);
 
     std::thread::spawn(move || {
-        let mut bpf = match Bpf::load(include_bytes!("../bpf/program.bpf.o")) {
+        let bpf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bpf").join("program.bpf.o");
+        let mut bpf = match Ebpf::load_file(&bpf_path) {
             Ok(b) => b,
             Err(e) => {
-                error!("Failed to load eBPF: {:?}", e);
+                error!("Failed to load eBPF from {:?}: {:?}", bpf_path, e);
                 return;
             }
         };
@@ -404,10 +368,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let mut perf = match PerfEventArray::try_from(map) {
+        let mut perf: PerfEventArrayBuffer<_> = match PerfEventArrayBuffer::try_from(map) {
             Ok(p) => p,
             Err(e) => {
-                error!("Failed to create PerfEventArray: {:?}", e);
+                error!("Failed to create PerfEventArrayBuffer: {:?}", e);
                 return;
             }
         };
@@ -418,18 +382,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let mut buf = [0u8; 4096];
         loop {
-            match perf.read_events(&mut buf, Duration::from_millis(100)) {
-                Ok(events) => {
-                    for event in events {
-                        if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
-                            let _ = ebpf_tx.blocking_send(evt);
-                        }
+            match perf.next() {
+                Some(Ok(event)) => {
+                    if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
+                        let _ = ebpf_tx.blocking_send(evt);
                     }
                 }
-                Err(e) => {
+                Some(Err(e)) => {
                     warn!("BPF read error: {:?}", e);
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                None => {
                     std::thread::sleep(Duration::from_millis(100));
                 }
             }
@@ -452,7 +416,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
         };
-
         let mut buf = [0u8; 1024];
         loop {
             match stream.read(&mut buf).await {
@@ -499,7 +462,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(_) => {}
             Err(e) => error!("❌ Tarama hatası: {}", e),
         }
-
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
