@@ -33,7 +33,8 @@ jobs:
 
       - name: Build Anti-Cheat Binary
         run: cargo build --release
-
+      - name: Ensure bin_hash.txt exists for first build
+        run: touch bin_hash.txt
       - name: Generate bin_hash.txt
         run: |
           sha256sum target/release/anti-cheat | awk '{print $1}' > bin_hash.txt
