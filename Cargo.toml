@@ -25,6 +25,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"             
 sha2 = "0.10"
 rusqlite = { version = "0.31", features = ["bundled"] }
+reqwest = { version = "0.11", features = ["json"] }  # HTTP istekleri için
+chrono = { version = "0.4", features = ["serde"] }
 nix = "0.29"
 procfs = "0.17"
 hex = "0.4"
