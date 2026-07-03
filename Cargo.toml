@@ -1,5 +1,5 @@
 [package]
-name = "anti-cheat"        
+name = "anti-cheat"
 version = "3.0.0"
 edition = "2021"
 authors = ["TuncorReUnion"]
@@ -8,30 +8,24 @@ license = "MIT"
 repository = "https://github.com/TuncorReUnion/TLAC-MODERN-LOCAL-ANTI-CHEAT-REUNIONED"
 
 [[bin]]
-name = "anti-cheat"    
+name = "anti-cheat"
 path = "src/main.rs"
-
-[[bin]]
-name = "ac-server"
-path = "src/bin/server_main.rs"   # ← DİKKAT: Bu dosya gerçekten var mı? Yoksa "src/ac-server.rs" yazmalısın
-
-[lib]
-name = "anti_cheat"
-path = "src/lib.rs"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1.0"             
+serde_json = "1.0"
 sha2 = "0.10"
+hex = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
-reqwest = { version = "0.11", features = ["json"] }  # HTTP istekleri için
-chrono = { version = "0.4", features = ["serde"] }
 nix = "0.29"
 procfs = "0.17"
-hex = "0.4"
-aya = { version = "0.14.0", optional = true }
-lazy_static = "1.4"           
+log = "0.4"
+env_logger = "0.11"
+aya = "0.19"
+reqwest = { version = "0.11", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
 
-[dev-dependencies]
-anyhow = "1.0"
+[lib]
+name = "anti_cheat"
+path = "src/lib.rs"
