@@ -15,7 +15,7 @@ pub enum AntiCheatMessage {
     },
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub enum BanCommand {
     Ban { hwid: String },
 }
