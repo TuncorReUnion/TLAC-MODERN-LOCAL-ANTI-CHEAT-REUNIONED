@@ -51,7 +51,6 @@ struct FoundCheat {
     severity: String,
 }
 
-let mut poll_buf = [0u8; 4096];
 match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
     Ok(events) => {
         for event in events {
@@ -110,6 +109,39 @@ fn generate_hwid() -> String {
     }
     format!("{:x}", hasher.finalize())
 }
+
+std::thread::spawn(move || {
+        // ... bpf yükleme ve map alma kodları ...
+
+        let mut buffers = Vec::new();
+        for cpu in online_cpus().unwrap_or_default() {
+            if let Ok(buf) = perf.open(cpu, None) {
+                buffers.push(buf);
+            }
+        }
+    
+        let mut poll_buf = [0u8; 4096];
+        
+        loop {
+            let mut read_any = false;
+            for buf in &mut buffers {
+                match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
+                    Ok(events) => {
+                        for event in events {
+                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
+                                let _ = ebpf_tx.blocking_send(evt);
+                            }
+                            read_any = true;
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+            if !read_any {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    });
 
 fn init_db() -> Result<Connection, Box<dyn std::error::Error>> {
     let db_path = "/var/lib/tlac/anti_cheat.db";
