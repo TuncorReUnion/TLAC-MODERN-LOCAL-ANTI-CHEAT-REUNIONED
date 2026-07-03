@@ -32,8 +32,6 @@ struct AntiCheatConfig
     log_path: String,
 }
 
-let perf = bpf.take_table::<PerfEventArray<_>>("suspicious_events")?;
-
 tokio::spawn(async move {
     for cpu in online_cpus()? {
         let mut events = perf.open(cpu, None)?;
@@ -411,6 +409,7 @@ fn is_hwid_banned(conn: &Connection, hwid: &str) -> std::result::Result<bool, Bo
 async fn main()
 {
     let mut bpf = Bpf::load(include_bytes!("../bpf/program.bpf.o"))?;
+    let perf = bpf.take_table::<PerfEventArray<_>>("suspicious_events")?;
     let hwid = generate_hwid();
     let conn = init_db().expect("Veritabanı açılamadı");
 
