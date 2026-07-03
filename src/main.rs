@@ -32,6 +32,24 @@ struct AntiCheatConfig
     log_path: String,
 }
 
+let mut bpf = Bpf::load(include_bytes!("../bpf/program.bpf.o"))?;
+let perf = bpf.take_table::<PerfEventArray<_>>("suspicious_events")?;
+
+tokio::spawn(async move {
+    for cpu in online_cpus()? {
+        let mut events = perf.open(cpu, None)?;
+        loop {
+            let batch = events.read_events(10, Duration::from_millis(100))?;
+            for event in batch {
+                if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(&event.data) {
+                    warn!("⚠️ Suspicious file opened: {} by PID {}", evt.filename, evt.pid);
+                    // → burada ban komutu gönderilebilir
+                }
+            }
+        }
+    }
+});
+
 fn load_config() -> Result<AntiCheatConfig, Box<dyn std::error::Error>>
 {
     let path = get_config_path();
