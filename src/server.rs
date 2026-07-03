@@ -41,11 +41,13 @@ pub async fn run_server(socket_path: &str, state: Arc<ServerState>) -> Result<()
                                         AntiCheatMessage::Heartbeat { hwid, pid, timestamp } => {
                                             info!("💓 Heartbeat from HWID: {} (PID: {}) at {}", hwid, pid, timestamp);
                                             
-                                            let bans = state_clone.banned_hwids.lock().unwrap();
-                                            if bans.contains_key(&hwid) {
-                                                let reason = bans.get(&hwid).cloned().unwrap_or_else(|| "Unknown".to_string());
-                                                drop(bans);
-                                                
+                                            // ✅ KİLİT SADECE BURADA TUTULUYOR VE .AWAIT ÖNCESİ BIRAKILIYOR
+                                            let ban_reason = {
+                                                let bans = state_clone.banned_hwids.lock().unwrap();
+                                                bans.get(&hwid).cloned()
+                                            }; // ← MutexGuard burada drop edildi
+
+                                            if let Some(reason) = ban_reason {
                                                 let ban_cmd = BanCommand::Ban { hwid: hwid.clone() };
                                                 if let Ok(json) = serde_json::to_vec(&ban_cmd) {
                                                     if let Err(e) = stream.write_all(&json).await {
