@@ -263,5 +263,278 @@ fn search_wildcard_pattern_in_bytes(bytes: &[u8], pattern: &[Option<u8>]) -> Opt
     None
 }
 
-fn search_wildcard_pattern_in_memory(pid: u32, start: usize,
-                                     
+fn search_wildcard_pattern_in_memory(pid: u32, start: usize, len: usize, pattern: &[Option<u8>]) -> Option<usize> {
+    if let Ok(memory) = read_memory_range(pid, start, len) {
+        if let Some(pos) = search_wildcard_pattern_in_bytes(&memory, pattern) {
+            return Some(start + pos);
+        }
+    }
+    None
+}
+
+async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error>> {
+    let sigs = match load_signatures() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("⚠️ Signature dosyası yüklenemedi: {}. Tarama atlanıyor.", e);
+            return Ok(Vec::new());
+        }
+    };
+
+    let mut found = Vec::new();
+    let proc = Process::new(pid as i32)?;
+    let pid_nix = Pid::from_raw(pid as i32);
+
+    match ptrace::attach(pid_nix) {
+        Ok(_) => {}
+        Err(e) => {
+            warn!("ptrace attach failed for PID {}: {}", pid, e);
+            return Ok(Vec::new());
+        }
+    }
+
+    for map in proc.maps()? {
+        let region_size = map.address.1 - map.address.0;
+
+        if region_size == 0 || region_size > MAX_REGION_SIZE as u64 {
+            eprintln!("⚠️ Büyük bölge atlandı: {:#x}-{:#x}", map.address.0, map.address.1);
+            continue;
+        }
+
+        let is_exec = map.perms.contains(procfs::process::MMPermissions::EXECUTE);
+        let is_writable = map.perms.contains(procfs::process::MMPermissions::WRITE);
+
+        for sig in &sigs {
+            let should_scan = sig.memory_regions.iter().any(|r| match r.to_lowercase().as_str() {
+                "executable" => is_exec,
+                "writable" => is_writable,
+                _ => true,
+            });
+            if !should_scan { continue; }
+
+            let pattern = parse_pattern(&sig.pattern);
+            if pattern.is_empty() {
+                eprintln!("⚠️ Boş pattern atlandı: {}", sig.name);
+                continue;
+            }
+
+            let start = map.address.0 as usize;
+            let len = region_size as usize;
+
+            if let Some(offset) = search_wildcard_pattern_in_memory(pid, start, len, &pattern) {
+                found.push(FoundCheat {
+                    name: sig.name.clone(),
+                    address: offset,
+                    severity: sig.severity.clone(),
+                });
+            }
+        }
+    }
+
+    ptrace::detach(pid_nix, None).ok();
+    Ok(found)
+}
+
+async fn send_to_server(socket_path: &str, msg: &AntiCheatMessage) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stream = UnixStream::connect(socket_path).await?;
+    let data = serde_json::to_vec(msg)?;
+    stream.write_all(&data).await?;
+    Ok(())
+}
+
+async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str) {
+    let msg = AntiCheatMessage::SuspiciousActivity {
+        pid,
+        reason,
+        memory_address: None,
+        signature_found: None,
+    };
+    if let Err(e) = send_to_server(socket_path, &msg).await {
+        eprintln!("❌ Failed to report to server: {}", e);
+    }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
+
+    let config = load_config().unwrap_or_else(|e| {
+        eprintln!("⚠️ Config hatası: {}, varsayılan kullanılıyor", e);
+        AntiCheatConfig::default()
+    });
+
+    println!("🔧 Anti-Cheat v{} başlatılıyor...", config.version);
+
+    if let Err(e) = verify_binary_integrity(&config.expected_binary_hash) {
+        eprintln!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
+        std::process::exit(1);
+    }
+    println!("✅ Binary bütünlüğü doğrulandı.");
+
+    let pid: u32 = std::env::args()
+        .nth(1)
+        .expect("❌ Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
+        .parse()
+        .expect("❌ Hata: PID geçerli bir sayı olmalı!");
+
+    let hwid = generate_hwid();
+    let conn = init_db().expect("Veritabanı açılamadı");
+
+    let is_banned = is_hwid_banned(&conn, &hwid)?;
+    if is_banned {
+        eprintln!("🚫 DONANIM BANLI! Sistem başlatılamıyor.");
+        std::process::exit(1);
+    }
+
+    match read_kernel_status() {
+        KernelStatus::Clean => println!("🛡️ Sistem temiz."),
+        KernelStatus::Suspicious => {
+            println!("⚠️ UYARI: Sistemde şüpheli aktivite tespit edildi!");
+            ban_hwid(&conn, &hwid, "Kernel modülü şüpheli aktivite tespit etti").ok();
+            println!("🚫 Sistem kapatılıyor.");
+            std::process::exit(1);
+        }
+        KernelStatus::Error(e) => println!("🛡️ Kernel modül hatası: {}", e),
+    }
+
+    let local_count: u32 = conn.query_row(
+        "SELECT COUNT(*) FROM hwid_bans", [], |row| row.get(0)
+    ).unwrap_or(0);
+    let sync_client = SyncClient::new("http://127.0.0.1:5000");
+    match sync_client.sync_bans(&hwid, local_count).await {
+        Ok(sync_data) => {
+            println!("📥 Sunucudan {} ban alındı.", sync_data.bans.len());
+            for ban in &sync_data.bans {
+                conn.execute(
+                    "INSERT OR IGNORE INTO hwid_bans (hwid, reason, banned_at) VALUES (?1, ?2, ?3)",
+                    [&ban.hwid, &ban.reason, &ban.banned_at],
+                ).ok();
+            }
+        }
+        Err(e) => {
+            eprintln!("⚠️ Sync başarısız, yerel veritabanı kullanılıyor: {}", e);
+        }
+    }
+
+    if is_hwid_banned(&conn, &hwid)? {
+        eprintln!("🚫 DONANIM BANLI! Sistem başlatılamıyor.");
+        std::process::exit(1);
+    }
+
+    println!("✅ HWID temiz: {}", hwid);
+
+    // --- Spawn eBPF listener ---
+    tokio::spawn(async move {
+        let mut bpf = match Ebpf::load(include_bytes!("../bpf/program.bpf.o")) {
+            Ok(b) => b,
+            Err(e) => {
+                error!("Failed to load eBPF: {}", e);
+                return;
+            }
+        };
+
+        let perf = match bpf.take_map::<PerfEventArray<_>>("suspicious_events") {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to get eBPF map: {}", e);
+                return;
+            }
+        };
+
+        loop {
+            match online_cpus() {
+                Ok(cpus) => {
+                    for cpu in cpus {
+                        let mut events = match perf.open(cpu, None) {
+                            Ok(e) => e,
+                            Err(e) => {
+                                warn!("Failed to open perf event for CPU {}: {}", cpu, e);
+                                continue;
+                            }
+                        };
+                        loop {
+                            match events.read_events(10, tokio::time::Duration::from_millis(100)) {
+                                Ok(batch) => {
+                                    for event in batch {
+                                        if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(&event.data) {
+                                            warn!("⚠️ eBPF: Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
+                                            report_suspicious_activity(evt.pid as u32, format!("Opened suspicious file: {}", evt.filename), "/tmp/anti-cheat.sock").await;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("BPF event read error: {}", e);
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get online CPUs: {:?}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    // --- Spawn Ban Command Receiver ---
+    tokio::spawn(async move {
+        let mut stream = match UnixStream::connect("/tmp/anti-cheat.sock").await {
+            Ok(s) => s,
+            Err(e) => {
+                error!("Failed to connect to /tmp/anti-cheat.sock: {}", e);
+                return;
+            }
+        };
+
+        let mut buf = [0u8; 1024];
+        loop {
+            match stream.read(&mut buf).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Ok(cmd) = serde_json::from_slice::<BanCommand>(&buf[..n]) {
+                        match cmd {
+                            BanCommand::Ban { hwid } => {
+                                warn!("🚨 BAN RECEIVED for HWID: {}", hwid);
+                                if let Err(e) = ban_hwid(&conn, &hwid, "Received ban command from server") {
+                                    error!("Failed to ban HWID {}: {}", hwid, e);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Socket read error: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                }
+            }
+        }
+    });
+
+    println!("🎯 Process {} izlenmeye başlandı...", pid);
+
+    loop {
+        match scan_all_signatures(pid).await {
+            Ok(found) if !found.is_empty() => {
+                for cheat in found {
+                    eprintln!("🚨 {} detected at {:#x}!", cheat.name, cheat.address);
+
+                    if let Err(e) = ban_hwid(&conn, &hwid, &cheat.name) {
+                        eprintln!("⚠️ Ban kaydı eklenemedi: {}", e);
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("❌ Tarama hatası: {}", e),
+        }
+
+        tokio::time::sleep(Duration::from_millis(config.scan_interval_ms)).await;
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct SuspiciousEvent {
+    pid: i32,
+    filename: String,
+}
