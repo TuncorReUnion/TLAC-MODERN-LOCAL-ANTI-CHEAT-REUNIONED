@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::net::UnixStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
 use rusqlite::Connection;
 use sha2::{Sha256, Digest};
 use serde::Deserialize;
@@ -17,18 +16,8 @@ use log::{warn, error, info};
 use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
 
-use aya::Bpf;
-use aya::maps::perf::PerfEventArray;
-use aya::util::online_cpus;
-
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
-
-#[derive(Deserialize, Debug)]
-struct SuspiciousEvent {
-    pid: i32,
-    filename: String,
-}
 
 #[derive(Deserialize, Debug, Clone)]
 struct SignatureFile {
@@ -346,71 +335,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("✅ HWID temiz: {}", hwid);
 
-    let (ebpf_tx, mut ebpf_rx) = mpsc::channel::<SuspiciousEvent>(100);
-
-    std::thread::spawn(move || {
-        let bpf_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("bpf").join("program.bpf.o");
-        let mut bpf = match Bpf::load_file(&bpf_path) {
-            Ok(b) => b,
-            Err(e) => {
-                error!("Failed to load eBPF from {:?}: {:?}", bpf_path, e);
-                return;
-            }
-        };
-
-        let map = match bpf.take_map("suspicious_events") {
-            Some(m) => m,
-            None => {
-                error!("eBPF map 'suspicious_events' not found");
-                return;
-            }
-        };
-
-        let mut perf = match PerfEventArray::try_from(map) {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Failed to create PerfEventArray: {:?}", e);
-                return;
-            }
-        };
-
-        let mut buffers = Vec::new();
-        for cpu in online_cpus().unwrap_or_default() {
-            if let Ok(buf) = perf.open(cpu, None) {
-                buffers.push(buf);
-            }
-        }
-
-        let mut poll_buf = [0u8; 4096];
-        loop {
-            let mut read_any = false;
-            for buf in &mut buffers {
-                match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
-                    Ok(events) => {
-                        for event in events {
-                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
-                                let _ = ebpf_tx.blocking_send(evt);
-                            }
-                            read_any = true;
-                        }
-                    }
-                    Err(_) => {}
-                }
-            }
-            if !read_any {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    });
-
-    let socket_path = "/tmp/anti-cheat.sock";
-    tokio::spawn(async move {
-        while let Some(evt) = ebpf_rx.recv().await {
-            warn!("⚠️ eBPF: Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
-            report_suspicious_activity(evt.pid as u32, format!("Opened suspicious file: {}", evt.filename), socket_path).await;
-        }
-    });
-
+    // Ban komutlarını dinleyen arka plan görevi
     tokio::spawn(async move {
         let mut stream = match UnixStream::connect("/tmp/anti-cheat.sock").await {
             Ok(s) => s,
@@ -460,6 +385,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Err(e) = ban_hwid(&conn, &hwid, &cheat.name) {
                         error!("⚠️ Ban kaydı eklenemedi: {}", e);
                     }
+                    // Şüpheli aktiviteyi sunucuya bildir
+                    report_suspicious_activity(pid, format!("{} detected", cheat.name), "/tmp/anti-cheat.sock").await;
                 }
             }
             Ok(_) => {}
