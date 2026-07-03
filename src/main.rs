@@ -433,13 +433,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        let perf = match bpf.take_map::<PerfEventArray<_>>("suspicious_events") {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Failed to get eBPF map: {}", e);
-                return;
-            }
-        };
+        let mut perf: PerfEventArray<_> = match bpf.take_map("suspicious_events") {
+    Some(map) => match PerfEventArray::try_from(map) {
+        Ok(p) => p,
+        Err(e) => {
+            error!("Failed to convert map to PerfEventArray: {}", e);
+            return;
+        }
+    },
+    None => {
+        error!("eBPF map 'suspicious_events' not found");
+        return;
+    }
+};
 
         loop {
             match online_cpus() {
