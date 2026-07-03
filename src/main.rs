@@ -94,7 +94,6 @@ fn calculate_binary_hash() -> Result<String, Box<dyn std::error::Error>> {
     }
     info!("✅ Binary integrity verified.");
     Ok(())
-}
 
 fn generate_hwid() -> String {
     let mut hasher = Sha256::new();
