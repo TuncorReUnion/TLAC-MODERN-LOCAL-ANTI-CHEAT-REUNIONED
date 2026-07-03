@@ -1,12 +1,9 @@
-use anti_cheat::server::AntiCheatServer;
+use anti_cheat::server::{run_server, ServerState};
+use std::sync::Arc;
 
 #[tokio::main]
-async fn main()
-{
-    let mut server = AntiCheatServer::new("/tmp/anti-cheat.sock");
-    println!("🛡️ TLAC Server başlatılıyor...");
-    if let Err(e) = server.run().await
-    {
-        eprintln!("❌ Server error: {}", e);
-    }
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
+    let state = Arc::new(ServerState::new());
+    run_server("/tmp/anti-cheat.sock", state).await
 }
