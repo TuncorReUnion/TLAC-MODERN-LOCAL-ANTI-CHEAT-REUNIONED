@@ -28,7 +28,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 nix = "0.29"
 procfs = "0.17"
 hex = "0.4"
-aya = { version = "0.19", optional = true }
+aya = { version = "0.14.0", optional = true }
 lazy_static = "1.4"           
 
 [dev-dependencies]
