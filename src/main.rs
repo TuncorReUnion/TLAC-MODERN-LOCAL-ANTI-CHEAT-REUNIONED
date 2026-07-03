@@ -292,13 +292,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     if let Err(e) = verify_binary_integrity() {
-        error!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
+        error!(" KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
         std::process::exit(1);
     }
 
     let pid: u32 = std::env::args()
         .nth(1)
-        .expect("❌ Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
+        .expect(" Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
         .parse()
         .expect("❌ Hata: PID geçerli bir sayı olmalı!");
 
@@ -382,7 +382,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let mut poll_buf = [0u8; 4096];
-                let mut poll_buf = [0u8; 4096];
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
@@ -402,6 +401,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
+    });
 
     let socket_path = "/tmp/anti-cheat.sock";
     tokio::spawn(async move {
@@ -450,7 +450,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    info!("🎯 Process {} izlenmeye başlandı...", pid);
+    info!(" Process {} izlenmeye başlandı...", pid);
 
     loop {
         match scan_all_signatures(pid).await {
