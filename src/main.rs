@@ -385,7 +385,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
-                for event in buf.iter() {
+                for event in &mut *buf {
                     match event {
                         Ok(event_data) => {
                             if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event_data.data()) {
