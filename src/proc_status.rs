@@ -3,10 +3,14 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 #[derive(Debug)]
-pub enum KernelStatus {
-    Clean,
-    Suspicious,
-    Error(String),
+pub struct KernelStatus {
+    pub modules: String,
+}
+
+pub fn read_kernel_status() -> KernelStatus {
+    let modules = std::fs::read_to_string("/proc/modules")
+        .unwrap_or_default();
+    KernelStatus { modules }
 }
 
 pub fn read_kernel_status() -> KernelStatus {
@@ -40,6 +44,6 @@ mod tests {
     #[test]
     fn test_read_status() {
         let status = read_kernel_status();
-        println!("Kernel Status: {:?}", status);  // Artık çalışır
+        println!("Kernel Status: {:?}", status);
     }
 }
