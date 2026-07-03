@@ -51,17 +51,6 @@ struct FoundCheat {
     severity: String,
 }
 
-match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
-    Ok(events) => {
-        for event in events {
-            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
-                let _ = ebpf_tx.blocking_send(evt);
-            }
-        }
-    }
-    Err(_) => {}
-}
-
 fn get_config_path() -> PathBuf {
     if let Ok(path) = env::var("TLAC_CONFIG") {
         return PathBuf::from(path);
@@ -84,16 +73,6 @@ fn calculate_binary_hash() -> Result<String, Box<dyn std::error::Error>> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-    let current_hash = calculate_binary_hash()?;
-    if current_hash != EMBEDDED_BINARY_HASH.trim() {
-        return Err(format!(
-            "!!! BINARY TAMPERING DETECTED!\nExpected: {}\nGot: {}",
-            EMBEDDED_BINARY_HASH.trim(), current_hash
-        ).into());
-    }
-    info!("✅ Binary integrity verified.");
-    Ok(())
-
 fn generate_hwid() -> String {
     let mut hasher = Sha256::new();
     if let Ok(uuid) = fs::read_to_string("/sys/class/dmi/id/product_uuid") {
@@ -109,39 +88,6 @@ fn generate_hwid() -> String {
     }
     format!("{:x}", hasher.finalize())
 }
-
-std::thread::spawn(move || {
-        // ... bpf yükleme ve map alma kodları ...
-
-        let mut buffers = Vec::new();
-        for cpu in online_cpus().unwrap_or_default() {
-            if let Ok(buf) = perf.open(cpu, None) {
-                buffers.push(buf);
-            }
-        }
-    
-        let mut poll_buf = [0u8; 4096];
-        
-        loop {
-            let mut read_any = false;
-            for buf in &mut buffers {
-                match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
-                    Ok(events) => {
-                        for event in events {
-                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
-                                let _ = ebpf_tx.blocking_send(evt);
-                            }
-                            read_any = true;
-                        }
-                    }
-                    Err(_) => {}
-                }
-            }
-            if !read_any {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-        }
-    });
 
 fn init_db() -> Result<Connection, Box<dyn std::error::Error>> {
     let db_path = "/var/lib/tlac/anti_cheat.db";
@@ -319,7 +265,6 @@ async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str)
 }
 
 fn get_embedded_hash() -> &'static str {
-    // İlk derlemede dosya yoksa boş döner, release build'te CI tarafından güncellenir
     include_str!("../bin_hash.txt")
 }
 
@@ -353,7 +298,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pid: u32 = std::env::args()
         .nth(1)
-        .expect(" Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
+        .expect("❌ Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
         .parse()
         .expect("❌ Hata: PID geçerli bir sayı olmalı!");
 
@@ -436,22 +381,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        let mut poll_buf = [0u8; 4096];
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
-                for event in buf.iter() {
-                    match event {
-                        Ok(event_data) => {
-                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event_data.data()) {
+                match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
+                    Ok(events) => {
+                        for event in events {
+                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
                                 let _ = ebpf_tx.blocking_send(evt);
                             }
                             read_any = true;
                         }
-                        Err(_) => {}
                     }
+                    Err(_) => {}
                 }
             }
-            
             if !read_any {
                 std::thread::sleep(Duration::from_millis(100));
             }
@@ -482,7 +427,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Ok(cmd) = serde_json::from_slice::<BanCommand>(&buf[..n]) {
                         match cmd {
                             BanCommand::Ban { hwid } => {
-                                warn!(" BAN RECEIVED for HWID: {}", hwid);
+                                warn!("🚨 BAN RECEIVED for HWID: {}", hwid);
                                 let conn = match Connection::open("/var/lib/tlac/anti_cheat.db") {
                                     Ok(c) => c,
                                     Err(e) => {
