@@ -8,12 +8,6 @@ pub struct KernelStatus {
 }
 
 pub fn read_kernel_status() -> KernelStatus {
-    let modules = std::fs::read_to_string("/proc/modules")
-        .unwrap_or_default();
-    KernelStatus { modules }
-}
-
-pub fn read_kernel_status() -> KernelStatus {
     let path = Path::new("/proc/tlac_status");
     if !path.exists() {
         return KernelStatus::Error("TLAC kernel module not loaded".to_string());
