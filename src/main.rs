@@ -24,8 +24,6 @@ use aya::util::online_cpus;
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
 
-const EMBEDDED_BINARY_HASH: &str = include_str!("../bin_hash.txt");
-
 #[derive(Deserialize, Debug)]
 struct SuspiciousEvent {
     pid: i32,
@@ -53,6 +51,18 @@ struct FoundCheat {
     severity: String,
 }
 
+let mut poll_buf = [0u8; 4096];
+match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
+    Ok(events) => {
+        for event in events {
+            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
+                let _ = ebpf_tx.blocking_send(evt);
+            }
+        }
+    }
+    Err(_) => {}
+}
+
 fn get_config_path() -> PathBuf {
     if let Ok(path) = env::var("TLAC_CONFIG") {
         return PathBuf::from(path);
@@ -75,11 +85,6 @@ fn calculate_binary_hash() -> Result<String, Box<dyn std::error::Error>> {
     Ok(hex::encode(hasher.finalize()))
 }
 
-fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
-    if EMBEDDED_BINARY_HASH.trim().is_empty() {
-        warn!("️ Binary hash embed edilmemiş, integrity check atlanıyor");
-        return Ok(());
-    }
     let current_hash = calculate_binary_hash()?;
     if current_hash != EMBEDDED_BINARY_HASH.trim() {
         return Err(format!(
