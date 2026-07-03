@@ -1,37 +1,21 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum AntiCheatMessage
-{
-    Heartbeat
-    {
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub enum AntiCheatMessage {
+    Heartbeat {
+        hwid: String,
         pid: u32,
-        timestamp: u64,
+        timestamp: String,
     },
-    SuspiciousActivity
-    {
+    SuspiciousActivity {
         pid: u32,
         reason: String,
-        memory_address: Option<u64>,
-        signature_found: Option<Vec<u8>>,
-    },
-    BanCommand
-    {
-        pid: u32,
-        ban_type: BanType,
-        reason: String,
-    },
-    Ack
-    {
-        message: String,
+        memory_address: Option<usize>,
+        signature_found: Option<String>,
     },
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub enum BanType
-{
-    Temporary { duration_seconds: u64 },
-    Permanent,
-    HardwareId,
-    IpAddress,
+#[derive(Deserialize, Debug)]
+pub enum BanCommand {
+    Ban { hwid: String },
 }
