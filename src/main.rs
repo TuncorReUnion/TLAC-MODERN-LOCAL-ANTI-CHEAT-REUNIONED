@@ -14,10 +14,10 @@ use procfs::process::Process;
 use hex;
 use log::{warn, error};
 
-use anti_cheat::messages::AntiCheatMessage;
+use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
 
-use aya::Bpf;
+use aya::Ebpf;
 use aya::util::online_cpus;
 use aya::maps::perf::PerfEventArray;
 
@@ -26,17 +26,6 @@ use proc_status::{read_kernel_status, KernelStatus};
 
 mod messages;
 mod sync_client;
-
-#[derive(Deserialize, Debug)]
-struct SuspiciousEvent {
-    pid: i32,
-    filename: String,
-}
-
-#[derive(Deserialize, Debug)]
-enum BanCommand {
-    Ban { hwid: String },
-}
 
 #[derive(Deserialize, Serialize, Debug, Default)]
 struct AntiCheatConfig {
@@ -115,12 +104,6 @@ fn generate_hwid() -> String {
         hasher.update(uuid.trim());
     }
 
-    if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo") {
-        if let Some(serial) = cpuinfo.lines().find(|l| l.starts_with("serial")) {
-            hasher.update(serial);
-        }
-    }
-
     if let Ok(mac) = fs::read_to_string("/sys/class/net/eth0/address") {
         hasher.update(mac.trim());
     } else if let Ok(mac) = fs::read_to_string("/sys/class/net/wlan0/address") {
@@ -171,36 +154,48 @@ fn is_hwid_banned(conn: &Connection, hwid: &str) -> std::result::Result<bool, Bo
     Ok(count > 0)
 }
 
-fn attach_to_process(pid: u32) -> nix::Result<()> {
-    let pid = Pid::from_raw(pid as i32);
-    ptrace::attach(pid)?;
-    println!("Process {} attached!", pid);
-    Ok(())
+#[derive(Debug, Clone)]
+struct FoundCheat {
+    name: String,
+    address: usize,
+    severity: String,
 }
 
-fn detach_from_process(pid: u32) -> nix::Result<()> {
-    let pid = Pid::from_raw(pid as i32);
-    ptrace::detach(pid, None)?;
-    println!("Process {} detached.", pid);
-    Ok(())
+#[derive(Deserialize, Debug, Clone)]
+struct SignatureFile {
+    signatures: Vec<CheatSignature>,
 }
 
-fn read_process_maps(pid: u32) -> procfs::ProcResult<()> {
-    let proc = Process::new(pid as i32)?;
-    for map in proc.maps()? {
-        let pathname_str = match &map.pathname {
-            procfs::process::MMapPath::Path(path) => path.display().to_string(),
-            procfs::process::MMapPath::Heap => "[heap]".to_string(),
-            procfs::process::MMapPath::Stack => "[stack]".to_string(),
-            procfs::process::MMapPath::Vvar => "[vvar]".to_string(),
-            procfs::process::MMapPath::Vdso => "[vdso]".to_string(),
-            procfs::process::MMapPath::Vsyscall => "[vsyscall]".to_string(),
-            procfs::process::MMapPath::Other(s) => format!("[{}]", s),
-            _ => "[unknown]".to_string(),
-        };
-        println!("{:x}-{:x} {:?} {:x} {:?} {}", map.address.0, map.address.1, map.perms, map.offset, map.dev, pathname_str);
+#[derive(Deserialize, Debug, Clone)]
+struct CheatSignature {
+    id: String,
+    name: String,
+    pattern: String,
+    severity: String,
+    memory_regions: Vec<String>,
+}
+
+fn parse_pattern(pattern_str: &str) -> Vec<Option<u8>> {
+    if pattern_str.trim().is_empty() {
+        return Vec::new();
     }
-    Ok(())
+
+    pattern_str.split_whitespace()
+        .filter_map(|byte| {
+            if byte == "?" || byte == "*" {
+                Some(None)
+            } else {
+                u8::from_str_radix(byte, 16).ok().map(Some)
+            }
+        })
+        .collect()
+}
+
+fn load_signatures() -> Result<Vec<CheatSignature>, Box<dyn std::error::Error>> {
+    let sig_path = PathBuf::from("/etc/tlac/signatures.json");
+    let content = fs::read_to_string(&sig_path)?;
+    let file: SignatureFile = serde_json::from_str(&content)?;
+    Ok(file.signatures)
 }
 
 const MAX_REGION_SIZE: usize = 256 * 1024 * 1024;
@@ -220,7 +215,7 @@ fn read_memory_range(pid: u32, start: usize, len: usize) -> nix::Result<Vec<u8>>
         let addr = (start + offset) as *mut std::ffi::c_void;
         match ptrace::read(pid, addr) {
             Ok(word) => data.extend_from_slice(&word.to_ne_bytes()),
-            Err(_) => break, // Stop on error, do not proceed as clean
+            Err(_) => break,
         }
     }
     Ok(data)
@@ -268,333 +263,5 @@ fn search_wildcard_pattern_in_bytes(bytes: &[u8], pattern: &[Option<u8>]) -> Opt
     None
 }
 
-fn search_wildcard_pattern_in_memory(pid: u32, start: usize, len: usize, pattern: &[Option<u8>]) -> Option<usize> {
-    if let Ok(memory) = read_memory_range(pid, start, len) {
-        if let Some(pos) = search_wildcard_pattern_in_bytes(&memory, pattern) {
-            return Some(start + pos);
-        }
-    }
-    None
-}
-
-#[derive(Debug, Clone)]
-struct FoundCheat {
-    name: String,
-    address: usize,
-    severity: String,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct SignatureFile {
-    signatures: Vec<CheatSignature>,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct CheatSignature {
-    id: String,
-    name: String,
-    pattern: String,
-    severity: String,
-    memory_regions: Vec<String>,
-}
-
-fn parse_pattern(pattern_str: &str) -> Vec<Option<u8>> {
-    if pattern_str.trim().is_empty() {
-        return Vec::new();
-    }
-
-    pattern_str.split_whitespace()
-        .filter_map(|byte| {
-            if byte == "?" || byte == "*" {
-                Some(None)
-            } else {
-                u8::from_str_radix(byte, 16).ok().map(Some)
-            }
-        })
-        .collect()
-}
-
-fn load_signatures() -> Result<Vec<CheatSignature>, Box<dyn std::error::Error>> {
-    let sig_path = PathBuf::from("/etc/tlac/signatures.json");
-    let content = fs::read_to_string(&sig_path)?;
-    let file: SignatureFile = serde_json::from_str(&content)?;
-    Ok(file.signatures)
-}
-
-async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error>> {
-    let sigs = match load_signatures() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("⚠️ Signature dosyası yüklenemedi: {}. Tarama atlanıyor.", e);
-            return Ok(Vec::new());
-        }
-    };
-
-    let mut found = Vec::new();
-    let proc = Process::new(pid as i32)?;
-    let pid_nix = Pid::from_raw(pid as i32);
-
-    match ptrace::attach(pid_nix) {
-        Ok(_) => {},
-        Err(e) => {
-            warn!("ptrace attach failed for PID {}: {}", pid, e);
-            // Instead of proceeding as clean, we should maybe return an error or handle differently
-            // For now, just return empty list to avoid false clean
-            return Ok(Vec::new());
-        }
-    }
-
-    for map in proc.maps()? {
-        let region_size = map.address.1 - map.address.0;
-
-        if region_size == 0 || region_size > MAX_REGION_SIZE as u64 {
-            eprintln!("⚠️ Büyük bölge atlandı: {:#x}-{:#x}", map.address.0, map.address.1);
-            continue;
-        }
-
-        let is_exec = map.perms.contains(procfs::process::MMPermissions::EXECUTE);
-        let is_writable = map.perms.contains(procfs::process::MMPermissions::WRITE);
-
-        for sig in &sigs {
-            let should_scan = sig.memory_regions.iter().any(|r| match r.to_lowercase().as_str() {
-                "executable" => is_exec,
-                "writable" => is_writable,
-                _ => true,
-            });
-            if !should_scan { continue; }
-
-            let pattern = parse_pattern(&sig.pattern);
-            if pattern.is_empty() {
-                eprintln!("⚠️ Boş pattern atlandı: {}", sig.name);
-                continue;
-            }
-
-            let start = map.address.0 as usize;
-            let len = region_size as usize;
-
-            if let Some(offset) = search_wildcard_pattern_in_memory(pid, start, len, &pattern) {
-                found.push(FoundCheat {
-                    name: sig.name.clone(),
-                    address: offset,
-                    severity: sig.severity.clone(),
-                });
-            }
-        }
-    }
-
-    if let Err(e) = ptrace::detach(pid_nix, None) {
-        warn!("ptrace detach failed for PID {}: {}", pid, e);
-    }
-    Ok(found)
-}
-
-async fn send_to_server(socket_path: &str, msg: &AntiCheatMessage) -> Result<(), Box<dyn std::error::Error>> {
-    let mut stream = UnixStream::connect(socket_path).await?;
-
-    let data = serde_json::to_vec(msg)?;
-    stream.write_all(&data).await?;
-
-    let mut buf = [0u8; 1024];
-    let _ = stream.read(&mut buf).await;
-
-    Ok(())
-}
-
-async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str) {
-    let msg = AntiCheatMessage::SuspiciousActivity {
-        pid,
-        reason,
-        memory_address: None,
-        signature_found: None,
-    };
-    if let Err(e) = send_to_server(socket_path, &msg).await {
-        eprintln!("❌ Failed to report to server: {}", e);
-    }
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = load_config().unwrap_or_else(|e| {
-        eprintln!("⚠️ Config hatası: {}, varsayılan kullanılıyor", e);
-        AntiCheatConfig::default()
-    });
-
-    println!("🔧 Anti-Cheat v{} başlatılıyor...", config.version);
-
-    // For now, using the config hash, but this should ideally be embedded or signed.
-    if let Err(e) = verify_binary_integrity(&config.expected_binary_hash) {
-        eprintln!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
-        std::process::exit(1);
-    }
-    println!("✅ Binary bütünlüğü doğrulandı.");
-
-    let pid: u32 = std::env::args()
-        .nth(1)
-        .expect("❌ Hata: PID belirtilmedi! Kullanım: ./Anti-Cheat <pid>")
-        .parse()
-        .expect("❌ Hata: PID geçerli bir sayı olmalı!");
-
-    let hwid = generate_hwid();
-    let conn = init_db().expect("Veritabanı açılamadı");
-
-    let is_banned: bool = conn.query_row(
-        "SELECT COUNT(*) > 0 FROM hwid_bans WHERE hwid = ?1", [&hwid], |row| row.get(0)
-    ).unwrap_or(false);
-
-    if is_banned {
-        eprintln!("🚫 DONANIM BANLI! Sistem başlatılamıyor.");
-        std::process::exit(1);
-    }
-
-    match read_kernel_status() {
-        KernelStatus::Clean => println!("🛡️ Sistem temiz."),
-        KernelStatus::Suspicious => {
-            println!("⚠️ UYARI: Sistemde şüpheli aktivite tespit edildi!");
-            if let Err(e) = ban_hwid(&conn, &hwid, "Kernel modülü şüpheli aktivite tespit etti") {
-                eprintln!("⚠️ Ban kaydı eklenemedi: {}", e);
-            }
-            println!("🚫 Sistem kapatılıyor.");
-            std::process::exit(1);
-        }
-        KernelStatus::Error(e) => println!("🛡️ Kernel modül hatası: {}", e),
-    }
-
-   
-    let local_count: u32 = conn.query_row(
-        "SELECT COUNT(*) FROM hwid_bans", [], |row| row.get(0)
-    ).unwrap_or(0);
-    let sync_client = SyncClient::new("http://127.0.0.1:5000");
-    match sync_client.sync_bans(&hwid, local_count).await {
-        Ok(sync_data) => {
-            println!("📥 Sunucudan {} ban alındı.", sync_data.bans.len());
-            for ban in &sync_data.bans {
-                conn.execute(
-                    "INSERT OR IGNORE INTO hwid_bans (hwid, reason, banned_at) VALUES (?1, ?2, ?3)",
-                    [&ban.hwid, &ban.reason, &ban.banned_at],
-                ).ok();
-            }
-        }
-        Err(e) => {
-            eprintln!("⚠️ Sync başarısız, yerel veritabanı kullanılıyor: {}", e);
-        }
-    }
-
-    if is_hwid_banned(&conn, &hwid)? {
-        eprintln!("🚫 DONANIM BANLI! Sistem başlatılamıyor.");
-        std::process::exit(1);
-    }
-
-    println!("✅ HWID temiz: {}", hwid);
-
-    let conn_clone = conn.try_clone()?;
-    tokio::spawn(async move {
-        // Load eBPF
-        let mut bpf = match Bpf::load(include_bytes!("../bpf/program.bpf.o")) {
-            Ok(b) => b,
-            Err(e) => {
-                error!("Failed to load eBPF: {}", e);
-                return;
-            }
-        };
-        let perf = match bpf.take_table::<PerfEventArray<_>>("suspicious_events") {
-            Ok(p) => p,
-            Err(e) => {
-                error!("Failed to get eBPF table: {}", e);
-                return;
-            }
-        };
-
-        loop {
-            match online_cpus() {
-                Ok(cpus) => {
-                    for cpu in cpus {
-                        let mut events = match perf.open(cpu, None) {
-                            Ok(e) => e,
-                            Err(e) => {
-                                warn!("Failed to open perf event for CPU {}: {}", cpu, e);
-                                continue;
-                            }
-                        };
-                        loop {
-                            match events.read_events(10, tokio::time::Duration::from_millis(100)) {
-                                Ok(batch) => {
-                                    for event in batch {
-                                        if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(&event.data) {
-                                            warn!("⚠️ eBPF: Suspicious file opened by PID {}: {}", evt.pid, evt.filename);
-                                            // Report to server
-                                            report_suspicious_activity(evt.pid as u32, format!("Opened suspicious file: {}", evt.filename), "/tmp/anti-cheat.sock").await;
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("BPF event read error: {}", e);
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to get online CPUs: {}", e);
-                    break;
-                }
-            }
-        }
-    });
-
-    let conn_clone2 = conn.try_clone()?;
-    tokio::spawn(async move {
-        let mut stream = match UnixStream::connect("/tmp/anti-cheat.sock").await {
-            Ok(s) => s,
-            Err(e) => {
-                error!("Failed to connect to /tmp/anti-cheat.sock: {}", e);
-                return;
-            }
-        };
-
-        let mut buf = [0u8; 1024];
-        loop {
-            match stream.read(&mut buf).await {
-                Ok(0) => break, // connection closed
-                Ok(n) => {
-                    if let Ok(cmd) = serde_json::from_slice::<BanCommand>(&buf[..n]) {
-                        match cmd {
-                            BanCommand::Ban { hwid } => {
-                                warn!("🚨 BAN RECEIVED for HWID: {}", hwid);
-                                if let Err(e) = ban_hwid(&conn_clone2, &hwid, "Received ban command from server") {
-                                    error!("Failed to ban HWID {}: {}", hwid, e);
-                                }
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!("Socket read error: {}", e);
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                }
-            }
-        }
-    });
-
-    println!("🎯 Process {} izlenmeye başlandı...", pid);
-
-    loop {
-        match scan_all_signatures(pid).await {
-            Ok(found) if !found.is_empty() => {
-                for cheat in found {
-                    eprintln!("🚨 {} detected at {:#x}!", cheat.name, cheat.address);
-
-                    if let Err(e) = ban_hwid(&conn, &hwid, &cheat.name) {
-                        eprintln!("⚠️ Ban kaydı eklenemedi: {}", e);
-                    }
-                }
-            }
-            Ok(_) => {
-                // println!("✅ Tarama temiz.");
-            }
-            Err(e) => eprintln!("❌ Tarama hatası: {}", e),
-        }
-
-        tokio::time::sleep(Duration::from_millis(config.scan_interval_ms)).await;
-    }
-}
+fn search_wildcard_pattern_in_memory(pid: u32, start: usize,
+                                     
