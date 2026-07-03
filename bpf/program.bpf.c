@@ -21,7 +21,18 @@ static inline int is_suspicious_file(const char *filename) {
     int len = 0;
     while (filename[len] != '\0' && len < 255) len++;
     if (len > 4) {
-        if (filename[len-3] == 's' && filename[len-2] == 'o') return 1;
+       // program.bpf.c
+static inline int is_suspicious_file(const char *filename) 
+{   
+    int len = 0;
+    while (filename[len] != '\0' && len < 255) len++;
+    if (len >= 4) 
+    {
+        if (len >= 3 && filename[len-3] == '.' && filename[len-2] == 's' && filename[len-1] == 'o') return 1; // ".so"
+        if (len >= 4 && filename[len-4] == '.' && filename[len-3] == 'd' && filename[len-2] == 'l' && filename[len-1] == 'l') return 1; // ".dll"
+    }
+    return 0;
+            {    
         if (filename[len-3] == 'd' && filename[len-2] == 'l') return 1;
     }
     return 0;
@@ -34,7 +45,7 @@ int trace_openat(struct trace_event_raw_sys_enter *args) {
     if (is_suspicious_file(filename)) {
     }
     return 0;
-}
+}    
 
 SEC("tracepoint/syscalls/sys_enter_execve")
 int trace_execve(struct trace_event_raw_sys_enter *args) {
