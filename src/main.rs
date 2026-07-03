@@ -384,19 +384,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut buf = [0u8; 4096];
         loop {
-            match perf.read_events(&mut buf, Duration::from_millis(100)) {
-                Ok(events) => {
-                    for event in events {
-                        if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
-                            let _ = ebpf_tx.blocking_send(evt);
-                        }
+            let mut buffers = Vec::new();
+for cpu in online_cpus().unwrap_or_default() {
+    if let Ok(buf) = perf.open(cpu, None) {
+        buffers.push(buf);
+    }
+}
+
+let mut poll_buf = [0u8; 4096];
+loop {
+    let mut read_any = false;
+    for buf in &mut buffers {
+        match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
+            Ok(events) => {
+                for event in events {
+                    if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
+                        let _ = ebpf_tx.blocking_send(evt);
                     }
                 }
-                Err(e) => {
-                    warn!("BPF read error: {:?}", e);
-                    std::thread::sleep(Duration::from_millis(100));
-                }
+                read_any = true;
             }
+            Err(_) => {}
+        }
+    }
+    if !read_any {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
         }
     });
 
