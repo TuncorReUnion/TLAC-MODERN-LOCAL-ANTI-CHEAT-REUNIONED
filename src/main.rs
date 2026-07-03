@@ -385,16 +385,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let mut read_any = false;
             for buf in &mut buffers {
-                match buf.read_events(&mut poll_buf, Duration::from_millis(10)) {
-                    Ok(events) => {
-                        for event in events {
-                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event.data()) {
+                for event in buf.iter() {
+                    match event {
+                        Ok(event_data) => {
+                            if let Ok(evt) = serde_json::from_slice::<SuspiciousEvent>(event_data.data()) {
                                 let _ = ebpf_tx.blocking_send(evt);
                             }
                             read_any = true;
                         }
+                        Err(_) => {}
                     }
-                    Err(_) => {}
                 }
             }
             if !read_any {
