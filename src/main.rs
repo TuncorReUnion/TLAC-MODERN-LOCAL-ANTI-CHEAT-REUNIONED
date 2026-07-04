@@ -15,7 +15,7 @@ use log::{warn, error, info};
 
 use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
-
+mod ebpf;
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
 
@@ -278,9 +278,16 @@ fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    
     env_logger::init();
 
-    if let Err(e) = verify_binary_integrity() {
+    if let Err(e) = ebpf::load_ebpf() 
+    {
+        eprintln!("❌ eBPF yüklenemedi: {}", e);
+    }
+    
+    if let Err(e) = verify_binary_integrity() 
+    {
         error!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
         std::process::exit(1);
     }
