@@ -32,6 +32,7 @@ BIN_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/tlac"
 MODULE_DIR="/lib/modules/${KERNEL_VERSION}/extra"
 BPF_DIR="/usr/lib/tlac/bpf"
+MODEL_DIR="$BIN_DIR/models"  # Binary'nin beklediği models klasörü
 
 print_status "TLAC v6.0 Installation started..."
 print_status "Kernel: ${KERNEL_VERSION}"
@@ -42,6 +43,7 @@ mkdir -p "$BIN_DIR"
 mkdir -p "$CONFIG_DIR"
 mkdir -p "$MODULE_DIR"
 mkdir -p "$BPF_DIR"
+mkdir -p "$MODEL_DIR"  # models klasörünü oluştur
 
 # ============================================
 # 1. MAIN BINARY (anti-cheat)
@@ -108,11 +110,11 @@ else
 fi
 
 # ============================================
-# 6. AI MODEL (anomaly_model.onnx) -> Binary ile aynı dizine
+# 6. AI MODEL (anomaly_model.onnx) -> Binary'nin beklediği yere (models/)
 # ============================================
 if [ -f "anomaly_model.onnx" ]; then
-    cp anomaly_model.onnx "$BIN_DIR/"
-    print_success "anomaly_model.onnx -> $BIN_DIR/"
+    cp anomaly_model.onnx "$MODEL_DIR/"
+    print_success "anomaly_model.onnx -> $MODEL_DIR/"
 else
     print_warning "anomaly_model.onnx not found (AI skipped)"
 fi
@@ -138,7 +140,7 @@ echo "  Server:         $BIN_DIR/server_main"
 echo "  Config:         $CONFIG_DIR/signatures.json"
 echo "  Kernel Module:  $MODULE_DIR/tlac_kernel.ko"
 echo "  eBPF:           $BPF_DIR/program.bpf.o"
-echo "  AI Model:       $BIN_DIR/anomaly_model.onnx"
+echo "  AI Model:       $MODEL_DIR/anomaly_model.onnx"
 echo ""
 echo "📌 To test eBPF logs:"
 echo "  sudo cat /sys/kernel/debug/tracing/trace_pipe"
