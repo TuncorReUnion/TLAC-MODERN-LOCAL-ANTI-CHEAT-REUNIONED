@@ -1,24 +1,47 @@
 # 🛡️ TLAC (Tuncor's Local Anti-Cheat)
 
-An open-source, user-level anti-cheat tool developed for Linux systems. It scans process memory using `ptrace` and `procfs`, detects cheat signatures (patterns), and supports HWID-based banning.
+**User-space + eBPF + AI powered anti-cheat for Linux**
 
-## ✨ Features
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/Rust-1.80+-orange.svg)](https://www.rust-lang.org/)
+[![Stars](https://img.shields.io/github/stars/TuncorReUnion/TLAC-MODERN-LOCAL-ANTI-CHEAT-REUNIONED?style=social)](https://github.com/TuncorReUnion/TLAC-MODERN-LOCAL-ANTI-CHEAT-REUNIONED/stargazers)
 
-- 🔍 **Memory Scanning:** Wildcard pattern support for flexible signature detection.
-- 🛡️ **Self-Integrity:** Binary integrity verification using SHA256 hashing.
-- 🖥️ **HWID Ban:** Hardware-based banning system to prevent cheaters from returning.
-- 🔌 **IPC Server:** Local client-server communication via Tokio async runtime.
-- 📦 **Config-Driven:** JSON-based configuration for easy customization.
-- 🔒 **Secure:** Database and configuration file protection.
+---
+
+**TLAC** is a lightweight, open-source anti-cheat solution built for Linux. It protects your games by scanning memory, detecting cheat signatures, and analyzing player behavior — all while staying in user-space and respecting your system.
+
+## 🚀 Why TLAC?
+
+| Feature | TLAC |
+|---|---|
+| **User-Space** | Runs without kernel-level access – safe and non-intrusive. |
+| **Local Server** | No cloud latency, no third-party data collection. |
+| **eBPF Support** | Kernel verification without the risk. |
+| **AI Behavioral Analysis** | Detects unknown cheats via anomaly detection. |
+| **HWID Ban** | Hardware-based bans to keep cheaters out. |
+| **Lightweight** | Only ~6 MB – minimal system impact. |
+| **Open Source** | Fully transparent, MIT licensed. |
+
+---
+
+## 📦 Features
+
+- 🔍 **Memory Scanning** – Wildcard pattern support for cheat signatures.
+- 🛡️ **Self-Integrity** – SHA256 binary verification.
+- 🖥️ **HWID Ban** – Hardware-based banning.
+- 🔌 **IPC Server** – Local server communication via Tokio.
+- 📦 **Config-Driven** – JSON-based configuration.
+- 🧠 **AI Anomaly Detection** – Behavioral analysis for unknown cheats.
+- 🐧 **Linux Native** – Runs on any Linux distribution, including Steam Deck.
+
+---
 
 ## 📥 Installation
 
-1. Download the latest release from the [Releases](https://github.com/YOUR_USERNAME/TLAC/releases) page.
-2. Extract the archive:
-   ```bash
-   tar -xvf TLAC-v0.1.0-x86_64-linux.tar.gz
-   3. Run the install.sh:
-   cd TLAC-v0.1.0-x86_64-linux/
-   ./install.sh
+### From Source (Recommended)
 
-   if want sudo. work with sudo.
+```bash
+git clone https://github.com/TuncorReUnion/TLAC-MODERN-LOCAL-ANTI-CHEAT-REUNIONED.git
+cd TLAC-MODERN-LOCAL-ANTI-CHEAT-REUNIONED
+cargo build --release
+sudo ./target/release/anti-cheat <PID>
