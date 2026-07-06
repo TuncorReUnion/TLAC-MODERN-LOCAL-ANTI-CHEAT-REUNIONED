@@ -12,7 +12,8 @@ use nix::unistd::Pid;
 use procfs::process::Process;
 use hex;
 use log::{warn, error, info};
-
+use ai::AIModel;
+mod ai;
 use anti_cheat::messages::{AntiCheatMessage, BanCommand};
 use anti_cheat::sync_client::SyncClient;
 mod ebpf;
@@ -278,7 +279,7 @@ fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    
+
     env_logger::init();
 
     if let Err(e) = ebpf::load_ebpf() 
@@ -304,6 +305,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if is_hwid_banned(&conn, &hwid)? {
         error!("🚫 DONANIM BANLI! Sistem başlatılamıyor.");
         std::process::exit(1);
+    }
+
+    let ai_model = match AIModel::new() {
+        Ok(model) => {
+            println!("✅ AI modeli başarıyla yüklendi!");
+            Some(model)
+        }
+        Err(e) => {
+            eprintln!("⚠️ AI modeli yüklenemedi: {}. Devam ediliyor...", e);
+            None
+        }
+    };
+
+    if let Some(ref model) = ai_model
+    {
+        let aim_speed = 0.85;
+        let accuracy = 0.92;
+        let reaction_time = 45.0;
+
+        match model.predict(aim_speed, accuracy, reaction_time)
+        {
+            Ok(score) =>
+            {
+                if model.is_suspicious(score)
+                {
+                    eprintln!("⚠️ AI şüpheli davranış tespit etti! Skor: {:.2}", score);
+                }
+            }
+            Err(e) => eprintln!("❌ AI tahmin hatası: {}", e),
+        }
     }
 
     match read_kernel_status() {
