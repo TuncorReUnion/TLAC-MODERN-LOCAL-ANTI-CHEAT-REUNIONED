@@ -1,7 +1,5 @@
 use ort::session::Session;
 use ort::value::Value;
-use ort::inputs;
-use ndarray::Array1;
 use std::path::Path;
 
 pub struct AIModel
@@ -25,15 +23,14 @@ impl AIModel
 
     pub fn predict(&self, aim_speed: f32, accuracy: f32, reaction_time: f32) -> Result<f32, Box<dyn std::error::Error>>
     {
-        let input_data = Array1::from_vec(vec![aim_speed, accuracy, reaction_time]);
-        let input_array = input_data.into_shape((1, 3))?;
+        let input_data = vec![aim_speed, accuracy, reaction_time];
+        let tensor = ort::tensor::Tensor::from_shape(&[1, 3], input_data)?;
+        let value = Value::from(tensor);
 
-        let input_value = Value::from_tensor(&input_array)?;
-        let inputs = inputs![input_value]?;
+        let outputs = self.session.run(vec![value])?;
 
-        let outputs = self.session.run(inputs)?;
-
-        let score = outputs[0].try_extract::<f32>()?[0];
+        let score_array = outputs[0].try_extract::<f32>()?;
+        let score = score_array[0];
         Ok(score)
     }
 
