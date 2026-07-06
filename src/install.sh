@@ -1,143 +1,144 @@
 #!/bin/bash
-
-# ==============================================================================
-# TLAC (Tuncor's Local Anti-Cheat) v4.0 Installer
-# Description: Installs the anti-cheat binary, server, configuration files, and kernel module.
+#
+# TLAC v6.0 Installer
+# TuncorReUnion - 2026
 # License: MIT
-# ==============================================================================
+#
 
 set -e
 
-# --- Configuration ---
-INSTALL_BIN_DIR="/usr/local/bin"
-CONFIG_DIR="/etc/tlac"
-DB_PATH="/var/lib/tlac/anti_cheat.db"
-SERVICE_NAME="tlac.service"
-KERNEL_MODULE="tlac_kernel.ko"
-BPF_PROGRAM="program.bpf.o"
-BIN_NAME="anti-cheat"
-SERVER_NAME="server_main"
-
-# --- Colors for Output ---
+# --- Colors ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
-log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+print_status() { echo -e "${BLUE}[*]${NC} $1"; }
+print_success() { echo -e "${GREEN}[+]${NC} $1"; }
+print_error() { echo -e "${RED}[!]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[⚠]${NC} $1"; }
 
 # --- Root Check ---
-if [ "$(id -u)" -ne 0 ]; then
-    log_error "This script must be run as root. Please use 'sudo ./install.sh'"
+if [ "$EUID" -ne 0 ]; then
+    print_error "This script must be run with root privileges!"
+    echo "Usage: sudo ./install.sh"
+    exit 1
 fi
 
-# --- 1. Install System Dependencies ---
-log_info "Installing system dependencies..."
-if command -v apt-get &> /dev/null; then
-    apt-get update -qq
-    apt-get install -y -qq build-essential libssl-dev pkg-config linux-headers-$(uname -r) > /dev/null
-elif command -v dnf &> /dev/null; then
-    dnf install -y make gcc openssl-devel pkg-config kernel-devel-$(uname -r) > /dev/null
-else
-    log_warn "Package manager not detected. Please ensure 'build-essential', 'libssl-dev', and kernel headers are installed manually."
-fi
+# --- Variables ---
+KERNEL_VERSION=$(uname -r)
+BIN_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/tlac"
+MODULE_DIR="/lib/modules/${KERNEL_VERSION}/extra"
+BPF_DIR="/usr/lib/tlac/bpf"
 
-# --- 2. Create Directory Structure ---
-log_info "Creating directory structure..."
-mkdir -p "$INSTALL_BIN_DIR"
+print_status "TLAC v6.0 Installation started..."
+print_status "Kernel: ${KERNEL_VERSION}"
+
+# --- Create Directories ---
+print_status "Creating directories..."
+mkdir -p "$BIN_DIR"
 mkdir -p "$CONFIG_DIR"
-mkdir -p "$(dirname "$DB_PATH")"
+mkdir -p "$MODULE_DIR"
+mkdir -p "$BPF_DIR"
 
-# --- 3. Install Binaries ---
-log_info "Installing binaries to $INSTALL_BIN_DIR..."
-if [ ! -f "$BIN_NAME" ]; then
-    log_error "Binary '$BIN_NAME' not found in current directory. Please run this script from the release folder."
-fi
-cp "$BIN_NAME" "$INSTALL_BIN_DIR/"
-chmod +x "$INSTALL_BIN_DIR/$BIN_NAME"
-
-if [ -f "$SERVER_NAME" ]; then
-    cp "$SERVER_NAME" "$INSTALL_BIN_DIR/"
-    chmod +x "$INSTALL_BIN_DIR/$SERVER_NAME"
-    log_info "Server binary installed: $INSTALL_BIN_DIR/$SERVER_NAME"
+# ============================================
+# 1. MAIN BINARY (anti-cheat)
+# ============================================
+if [ -f "anti-cheat" ]; then
+    cp anti-cheat "$BIN_DIR/"
+    chmod +x "$BIN_DIR/anti-cheat"
+    print_success "anti-cheat -> $BIN_DIR/"
 else
-    log_warn "Server binary '$SERVER_NAME' not found. Skipping server installation."
+    print_error "anti-cheat binary not found!"
+    exit 1
 fi
 
-# --- 4. Install Configuration ---
-log_info "Installing configuration files..."
-if [ ! -f "$CONFIG_DIR/signatures.json" ]; then
-    if [ -f "signatures.json" ]; then
-        cp "signatures.json" "$CONFIG_DIR/"
-        log_info "signatures.json installed to $CONFIG_DIR/"
+# ============================================
+# 2. SERVER BINARY (server_main)
+# ============================================
+if [ -f "server_main" ]; then
+    cp server_main "$BIN_DIR/"
+    chmod +x "$BIN_DIR/server_main"
+    print_success "server_main -> $BIN_DIR/"
+else
+    print_warning "server_main not found (optional)"
+fi
+
+# ============================================
+# 3. CONFIGURATION (signatures.json)
+# ============================================
+if [ -f "signatures.json" ]; then
+    cp signatures.json "$CONFIG_DIR/"
+    print_success "signatures.json -> $CONFIG_DIR/"
+else
+    print_warning "signatures.json not found"
+fi
+
+# ============================================
+# 4. KERNEL MODULE (tlac_kernel.ko)
+# ============================================
+if [ -f "tlac_kernel.ko" ]; then
+    cp tlac_kernel.ko "$MODULE_DIR/"
+    print_success "tlac_kernel.ko -> $MODULE_DIR/"
+
+    print_status "Loading kernel module..."
+    if lsmod | grep -q "^tlac_kernel"; then
+        rmmod tlac_kernel 2>/dev/null
+    fi
+    insmod "$MODULE_DIR/tlac_kernel.ko" 2>/dev/null
+    if lsmod | grep -q "^tlac_kernel"; then
+        print_success "Kernel module loaded successfully!"
     else
-        log_warn "signatures.json not found. You will need to create one manually at $CONFIG_DIR/signatures.json"
+        print_warning "Failed to load kernel module (check dmesg)"
     fi
 else
-    log_info "signatures.json already exists at $CONFIG_DIR/ (skipping)"
+    print_warning "tlac_kernel.ko not found (module skipped)"
 fi
 
-# --- 5. Kernel Module (Optional) ---
-if [ -f "$KERNEL_MODULE" ]; then
-    log_info "Installing kernel module..."
-    mkdir -p "/lib/modules/$(uname -r)/extra/"
-    cp "$KERNEL_MODULE" "/lib/modules/$(uname -r)/extra/"
-    depmod -a
-    if modprobe tlac_kernel 2>/dev/null; then
-        log_info "Kernel module loaded successfully."
-    else
-        log_warn "Failed to load kernel module. It may require a reboot or specific kernel config."
-    fi
+# ============================================
+# 5. eBPF PROGRAM (program.bpf.o)
+# ============================================
+if [ -f "program.bpf.o" ]; then
+    cp program.bpf.o "$BPF_DIR/"
+    print_success "program.bpf.o -> $BPF_DIR/"
 else
-    log_warn "Kernel module ($KERNEL_MODULE) not found. Skipping kernel-level protection."
+    print_warning "program.bpf.o not found (eBPF skipped)"
 fi
 
-# --- 6. eBPF Program (Optional) ---
-if [ -f "$BPF_PROGRAM" ]; then
-    log_info "Installing eBPF program..."
-    mkdir -p "/usr/lib/tlac/bpf/"
-    cp "$BPF_PROGRAM" "/usr/lib/tlac/bpf/"
-    log_info "eBPF program installed to /usr/lib/tlac/bpf/"
+# ============================================
+# 6. AI MODEL (anomaly_model.onnx) -> Binary ile aynı dizine
+# ============================================
+if [ -f "anomaly_model.onnx" ]; then
+    cp anomaly_model.onnx "$BIN_DIR/"
+    print_success "anomaly_model.onnx -> $BIN_DIR/"
 else
-    log_warn "eBPF program ($BPF_PROGRAM) not found. Skipping eBPF support."
+    print_warning "anomaly_model.onnx not found (AI skipped)"
 fi
 
-# --- 7. Systemd Service Setup ---
-log_info "Setting up systemd service..."
-cat > /etc/systemd/system/$SERVICE_NAME <<EOF
-[Unit]
-Description=TLAC Local Anti-Cheat Daemon
-After=network.target
+# ============================================
+# 7. POST-INSTALLATION CHECK
+# ============================================
+if [ -f "/proc/tlac_status" ]; then
+    print_success "/proc/tlac_status is active!"
+    cat /proc/tlac_status
+fi
 
-[Service]
-Type=simple
-ExecStart=$INSTALL_BIN_DIR/$BIN_NAME --daemon
-Restart=on-failure
-RestartSec=5s
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable $SERVICE_NAME
-
-# --- Completion ---
+print_success "TLAC v6.0 installation completed!"
 echo ""
-log_info "============================================"
-log_info " TLAC v4.0 Installation Complete!"
-log_info "============================================"
-log_info " Binary Location   : $INSTALL_BIN_DIR/$BIN_NAME"
-log_info " Server Location   : $INSTALL_BIN_DIR/$SERVER_NAME"
-log_info " Config Dir        : $CONFIG_DIR"
-log_info " Database Path     : $DB_PATH"
-log_info ""
-log_info "To start the service:"
-echo "  sudo systemctl start $SERVICE_NAME"
-log_info "To check logs:"
-echo "  journalctl -u $SERVICE_NAME -f"
-log_info "============================================"
+echo "📦 Usage:"
+echo "  sudo anti-cheat <PID>"
+echo "  sudo server_main"
+echo "  cat /proc/tlac_status"
+echo ""
+echo "📁 File locations:"
+echo "  Main Binary:    $BIN_DIR/anti-cheat"
+echo "  Server:         $BIN_DIR/server_main"
+echo "  Config:         $CONFIG_DIR/signatures.json"
+echo "  Kernel Module:  $MODULE_DIR/tlac_kernel.ko"
+echo "  eBPF:           $BPF_DIR/program.bpf.o"
+echo "  AI Model:       $BIN_DIR/anomaly_model.onnx"
+echo ""
+echo "📌 To test eBPF logs:"
+echo "  sudo cat /sys/kernel/debug/tracing/trace_pipe"
