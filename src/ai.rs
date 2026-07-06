@@ -1,4 +1,6 @@
-use ort::{Session, inputs, value::Value};
+use ort::session::Session;
+use ort::value::Value;
+use ort::inputs;
 use ndarray::Array1;
 use std::path::Path;
 
@@ -24,9 +26,9 @@ impl AIModel
     pub fn predict(&self, aim_speed: f32, accuracy: f32, reaction_time: f32) -> Result<f32, Box<dyn std::error::Error>>
     {
         let input_data = Array1::from_vec(vec![aim_speed, accuracy, reaction_time]);
-        let input = input_data.into_shape((1, 3))?;
+        let input_array = input_data.into_shape((1, 3))?;
 
-        let input_value = Value::from(input);
+        let input_value = Value::from_tensor(&input_array)?;
         let inputs = inputs![input_value]?;
 
         let outputs = self.session.run(inputs)?;
