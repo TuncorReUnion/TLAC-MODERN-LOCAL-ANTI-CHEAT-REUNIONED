@@ -1,10 +1,9 @@
-use ort::session::Session;
-use ort::value::Value;
+use tract_onnx::prelude::*;
 use std::path::Path;
 
 pub struct AIModel
 {
-    session: Session,
+    model: tract_onnx::prelude::SimplePlan<TypedFact, Box<dyn TypedOp>, tract_onnx::prelude::Graph<TypedFact, Box<dyn TypedOp>>>,
 }
 
 impl AIModel
@@ -16,22 +15,22 @@ impl AIModel
         {
             eprintln!("⚠️ UYARI: ONNX model dosyası bulunamadı: {:?}", model_path);
         }
-        let session = Session::builder()?
-        .with_model_from_file(model_path)?;
-        Ok(Self { session })
+        let model = tract_onnx::onnx()
+        .model_for_path(model_path)?
+        .into_optimized()?
+        .into_runnable()?;
+        Ok(Self { model })
     }
 
     pub fn predict(&self, aim_speed: f32, accuracy: f32, reaction_time: f32) -> Result<f32, Box<dyn std::error::Error>>
     {
         let input_data = vec![aim_speed, accuracy, reaction_time];
-        let tensor = ort::tensor::Tensor::from_shape(&[1, 3], input_data)?;
-        let value = Value::from(tensor);
+        let tensor = Tensor::from_shape(&[1, 3], input_data)?;
 
-        let outputs = self.session.run(vec![value])?;
+        let result = self.model.run(tvec!(tensor))?;
 
-        let score_array = outputs[0].try_extract::<f32>()?;
-        let score = score_array[0];
-        Ok(score)
+        let score = result[0].to_scalar::<f32>()?;
+        Ok(*score)
     }
 
     pub fn is_suspicious(&self, score: f32) -> bool
