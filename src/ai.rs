@@ -25,9 +25,9 @@ impl AIModel
     pub fn predict(&self, aim_speed: f32, accuracy: f32, reaction_time: f32) -> Result<f32, Box<dyn std::error::Error>>
     {
         let input_data = vec![aim_speed, accuracy, reaction_time];
-        let tensor = Tensor::from_shape(&[1, 3], input_data)?;
+        let tensor = Tensor::from_shape(&[1, 3], &input_data)?;
 
-        let result = self.model.run(tvec!(tensor))?;
+        let result = self.model.run(tvec!(tensor.into()))?;
 
         let score = result[0].to_scalar::<f32>()?;
         Ok(*score)
