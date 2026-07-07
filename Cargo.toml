@@ -37,3 +37,5 @@ strip = true
 [features]
 default = []
 ebpf = []
+server = []
+
