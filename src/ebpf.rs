@@ -1,11 +1,13 @@
-use aya::maps::perf::PerfEventArray;
 use aya::Bpf;
+use aya::maps::perf::PerfEventArray;
+use aya::util::online_cpus;
+use bytes::BytesMut;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use crate::SuspiciousEvent;
 
 pub async fn start_ebpf_event_loop(
-    bpf: &mut Ebpf,
+    bpf: &mut Bpf,  // Ebpf -> Bpf
     tx: mpsc::Sender<SuspiciousEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut perf_array: PerfEventArray<_> = bpf
@@ -13,14 +15,14 @@ pub async fn start_ebpf_event_loop(
         .ok_or("Map 'suspicious_events' not found!")?
         .try_into()?;
 
-    let cpu_ids = aya::util::online_cpus().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let cpu_ids = online_cpus().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     for cpu_id in cpu_ids {
         let mut buf = perf_array.open(cpu_id, None).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let tx_clone = tx.clone();
 
         tokio::spawn(async move {
-            let mut buffers = vec![bytes::BytesMut::with_capacity(4096)];
+            let mut buffers = vec![BytesMut::with_capacity(4096)];
 
             loop {
                 let events = match buf.read_events(&mut buffers) {
