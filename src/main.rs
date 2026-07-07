@@ -178,7 +178,7 @@ fn parse_pattern(pattern_str: &str) -> Vec<Option<u8>> {
         .collect()
 }
 
-fn load_signatures() -> Result<Vec<CheatSignature>, Box<dyn std::error::Error>> {
+fn load_signatures() -> Result<Vec<CheatSignature>, anyhow::Error> {
     let sig_path = PathBuf::from("/etc/tlac/signatures.json");
     if !sig_path.exists() {
         return Ok(Vec::new());
