@@ -24,7 +24,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang llvm libbpf-dev linux-headers-generic \
-            libudev-dev pkg-config bpftool
+            libudev-dev pkg-config \
+            linux-tools-common linux-tools-generic linux-tools-$(uname -r)
+      
+      - name: Verify bpftool Installation
+        run: bpftool --version
 
       - name: Generate vmlinux.h for eBPF
         run: |
