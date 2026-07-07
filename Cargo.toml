@@ -24,6 +24,7 @@ bytes = "1.5"
 aya = "0.12"
 tract-onnx = "0.19"
 reqwest = { version = "0.11", features = ["json"] }
+chrono = "0.4"  # ✅ YENİ EKLENDİ
 
 [build-dependencies]
 aya = "0.12"
@@ -38,4 +39,3 @@ strip = true
 default = []
 ebpf = []
 server = []
-
