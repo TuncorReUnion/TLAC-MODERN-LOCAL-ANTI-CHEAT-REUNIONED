@@ -100,7 +100,7 @@ fn generate_hwid() -> String {
         enumerator.match_subsystem("net").unwrap();
         enumerator.match_is_initialized().unwrap();
         for device in enumerator.scan_devices().unwrap() {
-            if let Some(sys_path) = device.syspath().to_str() {
+            if let Some(sys_path) = device.syspath().and_then(|p| p.to_str()) {
                 let mac_path = format!("{}/address", sys_path);
                 if let Ok(mac) = fs::read_to_string(&mac_path) {
                     let mac_trimmed = mac.trim();
@@ -239,7 +239,7 @@ fn search_wildcard_pattern_in_memory(pid: u32, start: usize, len: usize, pattern
     None
 }
 
-async fn scan_all_signatures(pid: u32, conn: &Connection) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error>> {
+async fn scan_all_signatures(pid: u32, _conn: &Connection) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error>> {
     let sigs = load_signatures()?;
     let mut found = Vec::new();
     let proc = Process::new(pid as i32)?;
@@ -323,10 +323,12 @@ async fn start_ebpf_event_loop(
     info!("Opening perf buffers for all online CPUs...");
 
     let cpu_ids = online_cpus().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let cpu_count = cpu_ids.len();
 
-    for cpu_id in cpu_ids {
-        let mut buf = perf_array.open(cpu_id, None).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    for cpu_id in &cpu_ids {
+        let mut buf = perf_array.open(*cpu_id, None).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let tx_clone = tx.clone();
+        let cpu_id_clone = *cpu_id;
 
         tokio::spawn(async move {
             let mut buffers = vec![BytesMut::with_capacity(4096)];
@@ -335,14 +337,14 @@ async fn start_ebpf_event_loop(
                 let events = match buf.read_events(&mut buffers) {
                     Ok(events) => events,
                     Err(e) => {
-                        error!("Perf buffer read error on CPU {}: {}", cpu_id, e);
+                        error!("Perf buffer read error on CPU {}: {}", cpu_id_clone, e);
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         continue;
                     }
                 };
 
                 if events.lost > 0 {
-                    error!("Lost {} events on CPU {} (buffer overflow!)", events.lost, cpu_id);
+                    error!("Lost {} events on CPU {} (buffer overflow!)", events.lost, cpu_id_clone);
                 }
 
                 for buf_data in &buffers[..events.read] {
@@ -355,7 +357,7 @@ async fn start_ebpf_event_loop(
                     };
 
                     if tx_clone.send(evt).await.is_err() {
-                        error!("Channel closed, stopping perf buffer on CPU {}", cpu_id);
+                        error!("Channel closed, stopping perf buffer on CPU {}", cpu_id_clone);
                         break;
                     }
                 }
@@ -365,7 +367,7 @@ async fn start_ebpf_event_loop(
         });
     }
 
-    info!("eBPF event loop started on {} CPUs", cpu_ids.len());
+    info!("eBPF event loop started on {} CPUs", cpu_count);
     Ok(())
 }
 
@@ -415,22 +417,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     start_ebpf_event_loop(&mut bpf, ebpf_tx).await?;
 
-    let tracepoint_openat: TracePoint = bpf.program_mut("trace_openat").unwrap().try_into()?;
+    let program_openat = bpf.program_mut("trace_openat").unwrap();
+    let tracepoint_openat: TracePoint = program_openat.try_into()?;
     tracepoint_openat.load()?;
     tracepoint_openat.attach("syscalls", "sys_enter_openat")?;
     info!("Attached trace_openat");
 
-    let tracepoint_execve: TracePoint = bpf.program_mut("trace_execve").unwrap().try_into()?;
+    let program_execve = bpf.program_mut("trace_execve").unwrap();
+    let tracepoint_execve: TracePoint = program_execve.try_into()?;
     tracepoint_execve.load()?;
     tracepoint_execve.attach("syscalls", "sys_enter_execve")?;
     info!("Attached trace_execve");
 
-    let tracepoint_ptrace: TracePoint = bpf.program_mut("trace_ptrace").unwrap().try_into()?;
+    let program_ptrace = bpf.program_mut("trace_ptrace").unwrap();
+    let tracepoint_ptrace: TracePoint = program_ptrace.try_into()?;
     tracepoint_ptrace.load()?;
     tracepoint_ptrace.attach("syscalls", "sys_enter_ptrace")?;
     info!("Attached trace_ptrace");
 
-    let tracepoint_clone: TracePoint = bpf.program_mut("trace_clone").unwrap().try_into()?;
+    let program_clone = bpf.program_mut("trace_clone").unwrap();
+    let tracepoint_clone: TracePoint = program_clone.try_into()?;
     tracepoint_clone.load()?;
     tracepoint_clone.attach("syscalls", "sys_enter_clone")?;
     info!("Attached trace_clone");
