@@ -356,10 +356,10 @@ pub async fn start_ebpf_event_loop(
 
     info!("Opening perf buffers for all online CPUs...");
 
-    let cpu_ids = online_cpus().map_err(|(_, e)| e)?;
+    let cpu_ids = online_cpus().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     for cpu_id in cpu_ids {
-        let mut buf = perf_array.open(cpu_id, None).map_err(|(_, e)| e)?;
+        let mut buf = perf_array.open(cpu_id, None).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         let tx_clone = tx.clone();
 
         tokio::spawn(async move {
