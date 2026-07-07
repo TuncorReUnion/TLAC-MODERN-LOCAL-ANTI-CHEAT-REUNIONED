@@ -1,21 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub enum AntiCheatMessage {
-    Heartbeat {
-        hwid: String,
-        pid: u32,
-        timestamp: String,
-    },
-    SuspiciousActivity {
-        pid: u32,
-        reason: String,
-        memory_address: Option<usize>,
-        signature_found: Option<String>,
-    },
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AntiCheatMessage {
+    pub pid: u32,
+    pub event_type: String,
+    pub data: serde_json::Value,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
-pub enum BanCommand {
-    Ban { hwid: String },
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BanCommand {
+    pub hwid: String,
+    pub reason: String,
+    pub timestamp: u64,
 }
