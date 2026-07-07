@@ -19,23 +19,31 @@ jobs:
         with:
           targets: x86_64-unknown-linux-musl
 
-      - name: Install eBPF Build Dependencies
+      - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm libbpf-dev linux-headers-generic
+          sudo apt-get install -y \
+            clang llvm libbpf-dev linux-headers-generic \
+            libudev-dev pkg-config bpftool
+
+      - name: Generate vmlinux.h for eBPF
+        run: |
+          mkdir -p bpf
+          bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/vmlinux.h
 
       - name: Build eBPF Program
         run: |
-          mkdir -p bpf
           clang -g -O2 -target bpf -D__TARGET_ARCH_x86_64 \
-            -I /usr/include/x86_64-linux-gnu \
+            -mllvm -bpf-stack-size=1024 \
             -c bpf/program.bpf.c -o bpf/program.bpf.o
+
+      - name: Create Placeholder Hash (Pre-Build)
+        run: echo "placeholder" > bin_hash.txt
 
       - name: Build Anti-Cheat Binary
         run: cargo build --release
-      - name: Ensure bin_hash.txt exists for first build
-        run: touch bin_hash.txt
-      - name: Generate bin_hash.txt
+
+      - name: Generate Real Binary Hash
         run: |
           sha256sum target/release/anti-cheat | awk '{print $1}' > bin_hash.txt
           echo "✅ Generated hash:"
@@ -49,5 +57,6 @@ jobs:
             target/release/anti-cheat
             bin_hash.txt
             bpf/program.bpf.o
-            install.sh
             signatures.json
+            install.sh
+          if-no-files-found: warn
