@@ -417,26 +417,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     start_ebpf_event_loop(&mut bpf, ebpf_tx).await?;
 
-    let program_openat = bpf.program_mut("trace_openat").unwrap();
-    let tracepoint_openat: TracePoint = program_openat.try_into()?;
+    // ✅ DÜZELTİLMİŞ TRACEPOINT ATTACHMENT KODU
+    let tracepoint_openat: &mut TracePoint = bpf.program_mut("trace_openat").unwrap().try_into()?;
     tracepoint_openat.load()?;
     tracepoint_openat.attach("syscalls", "sys_enter_openat")?;
     info!("Attached trace_openat");
 
-    let program_execve = bpf.program_mut("trace_execve").unwrap();
-    let tracepoint_execve: TracePoint = program_execve.try_into()?;
+    let tracepoint_execve: &mut TracePoint = bpf.program_mut("trace_execve").unwrap().try_into()?;
     tracepoint_execve.load()?;
     tracepoint_execve.attach("syscalls", "sys_enter_execve")?;
     info!("Attached trace_execve");
 
-    let program_ptrace = bpf.program_mut("trace_ptrace").unwrap();
-    let tracepoint_ptrace: TracePoint = program_ptrace.try_into()?;
+    let tracepoint_ptrace: &mut TracePoint = bpf.program_mut("trace_ptrace").unwrap().try_into()?;
     tracepoint_ptrace.load()?;
     tracepoint_ptrace.attach("syscalls", "sys_enter_ptrace")?;
     info!("Attached trace_ptrace");
 
-    let program_clone = bpf.program_mut("trace_clone").unwrap();
-    let tracepoint_clone: TracePoint = program_clone.try_into()?;
+    let tracepoint_clone: &mut TracePoint = bpf.program_mut("trace_clone").unwrap().try_into()?;
     tracepoint_clone.load()?;
     tracepoint_clone.attach("syscalls", "sys_enter_clone")?;
     info!("Attached trace_clone");
