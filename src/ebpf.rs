@@ -1,5 +1,5 @@
 use aya::maps::perf::PerfEventArray;
-use aya::Ebpf;
+use aya::Bpf;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use crate::SuspiciousEvent;
