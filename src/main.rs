@@ -9,8 +9,7 @@ use nix::unistd::Pid;
 use procfs::process::Process;
 use log::{warn, error, info};
 use std::sync::Arc;
-use tokio::sync::Mutex; // tokio'nun Mutex'ini kullan
-
+use tokio::sync::Mutex;
 mod proc_status;
 use proc_status::{read_kernel_status, KernelStatus};
 
