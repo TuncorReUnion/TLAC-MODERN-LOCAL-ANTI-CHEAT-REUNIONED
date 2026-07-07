@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::net::UnixStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use rusqlite::Connection;
 use sha2::{Sha256, Digest};
 use serde::Deserialize;
@@ -276,7 +276,7 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
     let sigs = match load_signatures() {
         Ok(s) => s,
         Err(e) => {
-            warn!("⚠️ Signature dosyası yüklenemedi: {}. Tarama atlanıyor.", e);
+            warn!("️ Signature dosyası yüklenemedi: {}. Tarama atlanıyor.", e);
             return Ok(Vec::new());
         }
     };
@@ -362,11 +362,11 @@ pub async fn start_ebpf_event_loop(
 
     info!("🔌 Opening perf buffers for all online CPUs...");
 
-    let cpu_ids = online_cpus().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    let cpu_ids = online_cpus().map_err(|(_, e)| e)?;
     let mut buffers = Vec::new();
 
     for cpu_id in cpu_ids {
-        let mut buf = perf_array.open(cpu_id, None).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        let mut buf = perf_array.open(cpu_id, None).map_err(|(_, e)| e)?;
 
         let tx_clone = tx.clone();
         tokio::spawn(async move {
@@ -383,7 +383,7 @@ pub async fn start_ebpf_event_loop(
                 };
 
                 if events.lost > 0 {
-                    error!("⚠️ Lost {} events on CPU {} (buffer overflow!)", events.lost, cpu_id);
+                    error!("️ Lost {} events on CPU {} (buffer overflow!)", events.lost, cpu_id);
                 }
 
                 for buf_data in &buffers[..events.read] {
@@ -446,7 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ HWID temiz: {}", hwid);
 
     println!("Loading eBPF program...");
-    let mut bpf = Ebpf::load(include_bytes_aligned!("../../bpf/program.bpf.o"))?;
+    let mut bpf = Ebpf::load(include_bytes_aligned!("../bpf/program.bpf.o"))?;
 
     let (ebpf_tx, mut ebpf_rx) = mpsc::channel::<SuspiciousEvent>(1024);
 
@@ -489,7 +489,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             error!("🚫 Sistem kapatılıyor.");
             std::process::exit(1);
         }
-        KernelStatus::Error(e) => warn!("🛡️ Kernel modül hatası: {}", e),
+        KernelStatus::Error(e) => warn!("️ Kernel modül hatası: {}", e),
     }
 
     let ai_handle = tokio::spawn(async move {
@@ -514,7 +514,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         error!("🚨 {} detected at {:#x}!", cheat.name, cheat.address);
                         let hwid = generate_hwid();
                         if let Err(e) = ban_hwid(&conn, &hwid, &cheat.name) {
-                            error!("⚠️ Ban kaydı eklenemedi: {}", e);
+                            error!("️ Ban kaydı eklenemedi: {}", e);
                         }
                         report_suspicious_activity(pid, format!("{} detected", cheat.name), "/tmp/anti-cheat.sock").await;
                     }
