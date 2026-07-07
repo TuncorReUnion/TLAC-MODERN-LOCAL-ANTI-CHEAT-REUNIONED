@@ -21,8 +21,6 @@ use bytes::BytesMut;
 
 mod ai;
 mod ebpf;
-mod proc_status;
-use proc_status::{read_kernel_status, KernelStatus};
 
 const INFERENCE_INTERVAL: Duration = Duration::from_millis(100);
 const DEFAULT_AI_THRESHOLD: f32 = 0.75;
@@ -109,17 +107,17 @@ fn get_embedded_hash() -> &'static str {
 fn verify_binary_integrity() -> Result<(), Box<dyn std::error::Error>> {
     let expected = get_embedded_hash().trim();
     if expected.is_empty() {
-        warn!("⚠️ Binary hash embed edilmemiş (ilk derleme). Integrity check atlanıyor.");
+        warn!("Binary hash embed edilmemiş (ilk derleme). Integrity check atlanıyor.");
         return Ok(());
     }
     let current_hash = calculate_binary_hash()?;
     if current_hash != expected {
         return Err(format!(
-            "!!! BINARY TAMPERING DETECTED!\nExpected: {}\nGot: {}",
+            "Binary tampering detected!\nExpected: {}\nGot: {}",
             expected, current_hash
         ).into());
     }
-    info!("✅ Binary integrity verified.");
+    info!("Binary integrity verified.");
     Ok(())
 }
 
@@ -216,6 +214,9 @@ fn parse_pattern(pattern_str: &str) -> Vec<Option<u8>> {
 
 fn load_signatures() -> Result<Vec<CheatSignature>, Box<dyn std::error::Error>> {
     let sig_path = PathBuf::from("/etc/tlac/signatures.json");
+    if !sig_path.exists() {
+        return Ok(Vec::new());
+    }
     let content = fs::read_to_string(&sig_path)?;
     let file: SignatureFile = serde_json::from_str(&content)?;
     Ok(file.signatures)
@@ -272,15 +273,8 @@ fn search_wildcard_pattern_in_memory(pid: u32, start: usize, len: usize, pattern
     None
 }
 
-async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error>> {
-    let sigs = match load_signatures() {
-        Ok(s) => s,
-        Err(e) => {
-            warn!("️ Signature dosyası yüklenemedi: {}. Tarama atlanıyor.", e);
-            return Ok(Vec::new());
-        }
-    };
-
+async fn scan_all_signatures(pid: u32, conn: &Connection) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error>> {
+    let sigs = load_signatures()?;
     let mut found = Vec::new();
     let proc = Process::new(pid as i32)?;
     let pid_nix = Pid::from_raw(pid as i32);
@@ -288,7 +282,7 @@ async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::e
     match ptrace::attach(pid_nix) {
         Ok(_) => {}
         Err(e) => {
-            error!("❌ ptrace attach failed for PID {}: {}. Bu işlem temiz kabul edilemez!", pid, e);
+            error!("ptrace attach failed for PID {}: {}", pid, e);
             return Err(format!("ptrace_attach_failed: {}", e).into());
         }
     }
@@ -347,7 +341,7 @@ async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str)
         "signature_found": null
     });
     if let Err(e) = send_to_server(socket_path, &msg).await {
-        error!("❌ Failed to report to server: {}", e);
+        error!("Failed to report to server: {}", e);
     }
 }
 
@@ -360,15 +354,14 @@ pub async fn start_ebpf_event_loop(
         .ok_or("Map 'suspicious_events' not found!")?
         .try_into()?;
 
-    info!("🔌 Opening perf buffers for all online CPUs...");
+    info!("Opening perf buffers for all online CPUs...");
 
     let cpu_ids = online_cpus().map_err(|(_, e)| e)?;
-    let mut buffers = Vec::new();
 
     for cpu_id in cpu_ids {
         let mut buf = perf_array.open(cpu_id, None).map_err(|(_, e)| e)?;
-
         let tx_clone = tx.clone();
+
         tokio::spawn(async move {
             let mut buffers = vec![BytesMut::with_capacity(4096)];
 
@@ -376,14 +369,14 @@ pub async fn start_ebpf_event_loop(
                 let events = match buf.read_events(&mut buffers) {
                     Ok(events) => events,
                     Err(e) => {
-                        error!("❌ Perf buffer read error on CPU {}: {}", cpu_id, e);
+                        error!("Perf buffer read error on CPU {}: {}", cpu_id, e);
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         continue;
                     }
                 };
 
                 if events.lost > 0 {
-                    error!("️ Lost {} events on CPU {} (buffer overflow!)", events.lost, cpu_id);
+                    error!("Lost {} events on CPU {} (buffer overflow!)", events.lost, cpu_id);
                 }
 
                 for buf_data in &buffers[..events.read] {
@@ -395,14 +388,6 @@ pub async fn start_ebpf_event_loop(
                         std::ptr::read_unaligned(buf_data.as_ptr() as *const SuspiciousEvent)
                     };
 
-                    info!(
-                        "🚨 [{}] PID={} | {} | {}",
-                        evt.comm_str(),
-                        evt.pid,
-                        evt.syscall_name(),
-                        evt.filename_str()
-                    );
-
                     if tx_clone.send(evt).await.is_err() {
                         error!("Channel closed, stopping perf buffer on CPU {}", cpu_id);
                         break;
@@ -412,12 +397,25 @@ pub async fn start_ebpf_event_loop(
                 buffers[0].clear();
             }
         });
-
-        buffers.push(buf);
     }
 
-    info!("✅ eBPF event loop started on {} CPUs", buffers.len());
+    info!("eBPF event loop started on {} CPUs", cpu_ids.len());
     Ok(())
+}
+
+async fn process_events(event_buffer: &mut Vec<SuspiciousEvent>, threshold: f32, conn: &Connection) {
+    for event in event_buffer.iter() {
+        let score = event.syscall_type as f32 / 4.0;
+        if score > threshold {
+            let hwid = generate_hwid();
+            error!("Anomaly detected! Score: {:.3} | Syscall: {} | PID: {}",
+                   score, event.syscall_name(), event.pid);
+            let _ = ban_hwid(conn, &hwid, &format!("AI anomaly score: {:.3}", score));
+            error!("HWID banned: {}", hwid);
+            std::process::exit(1);
+        }
+    }
+    event_buffer.clear();
 }
 
 #[tokio::main]
@@ -425,27 +423,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
     if let Err(e) = verify_binary_integrity() {
-        error!("🚨 KRİTİK: Binary değiştirilmiş! Sistem kapatılıyor. ({})", e);
+        error!("Critical: Binary tampering detected! System shutting down. ({})", e);
         std::process::exit(1);
     }
 
     let pid: u32 = std::env::args()
         .nth(1)
-        .expect("❌ Hata: PID belirtilmedi! Kullanım: ./tlac <pid>")
+        .expect("Error: PID not specified! Usage: ./tlac <pid>")
         .parse()
-        .expect("❌ Hata: PID geçerli bir sayı olmalı!");
+        .expect("Error: PID must be a valid number!");
 
     let hwid = generate_hwid();
-    let conn = init_db().expect("Veritabanı açılamadı");
+    let conn = init_db().expect("Database cannot be opened");
 
     if is_hwid_banned(&conn, &hwid)? {
-        error!("🚫 DONANIM BANLI! Sistem başlatılamıyor.");
+        error!("Hardware banned! System cannot start.");
         std::process::exit(1);
     }
 
-    info!("✅ HWID temiz: {}", hwid);
+    info!("HWID clean: {}", hwid);
 
-    println!("Loading eBPF program...");
     let mut bpf = Ebpf::load(include_bytes_aligned!("../bpf/program.bpf.o"))?;
 
     let (ebpf_tx, mut ebpf_rx) = mpsc::channel::<SuspiciousEvent>(1024);
@@ -472,55 +469,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracepoint_clone.attach("syscalls", "sys_enter_clone")?;
     info!("Attached trace_clone");
 
-    println!("All tracepoints attached. Listening for events...");
-
     let threshold: f32 = std::env::var("TLAC_AI_THRESHOLD")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_AI_THRESHOLD);
 
-    let mut last_inference_time = tokio::time::Instant::now();
-
-    match read_kernel_status() {
-        KernelStatus::Clean => info!("🛡️ Sistem temiz."),
-        KernelStatus::Suspicious(msg) => {
-            warn!("⚠️ UYARI: Sistemde şüpheli aktivite tespit edildi: {}", msg);
-            let _ = ban_hwid(&conn, &hwid, &format!("Kernel modülü şüpheli aktivite tespit etti: {}", msg));
-            error!("🚫 Sistem kapatılıyor.");
-            std::process::exit(1);
-        }
-        KernelStatus::Error(e) => warn!("️ Kernel modül hatası: {}", e),
-    }
+    let mut event_buffer = Vec::with_capacity(64);
+    let mut interval = tokio::time::interval(INFERENCE_INTERVAL);
 
     let ai_handle = tokio::spawn(async move {
-        while let Some(event) = ebpf_rx.recv().await {
-            if last_inference_time.elapsed() >= INFERENCE_INTERVAL {
-                let score = event.syscall_type as f32 / 4.0;
-                if score > threshold {
-                    error!("🚨 ANOMALY DETECTED! Score: {:.3} | Syscall: {}", score, event.syscall_name());
-                    let hwid = generate_hwid();
-                    warn!("💀 Banning HWID: {} | Reason: AI anomaly score {:.3}", hwid, score);
+        let conn = init_db().expect("Database cannot be opened");
+        loop {
+            tokio::select! {
+                Some(event) = ebpf_rx.recv() => {
+                    event_buffer.push(event);
+                    if event_buffer.len() >= 32 {
+                        process_events(&mut event_buffer, threshold, &conn).await;
+                    }
                 }
-                last_inference_time = tokio::time::Instant::now();
+                _ = interval.tick() => {
+                    if !event_buffer.is_empty() {
+                        process_events(&mut event_buffer, threshold, &conn).await;
+                    }
+                }
             }
         }
     });
 
     let scan_handle = tokio::spawn(async move {
+        let conn = init_db().expect("Database cannot be opened");
         loop {
-            match scan_all_signatures(pid).await {
+            match scan_all_signatures(pid, &conn).await {
                 Ok(found) if !found.is_empty() => {
                     for cheat in found {
-                        error!("🚨 {} detected at {:#x}!", cheat.name, cheat.address);
+                        error!("{} detected at {:#x}!", cheat.name, cheat.address);
                         let hwid = generate_hwid();
                         if let Err(e) = ban_hwid(&conn, &hwid, &cheat.name) {
-                            error!("️ Ban kaydı eklenemedi: {}", e);
+                            error!("Ban record could not be added: {}", e);
                         }
                         report_suspicious_activity(pid, format!("{} detected", cheat.name), "/tmp/anti-cheat.sock").await;
+                        error!("System shutting down due to cheat detection");
+                        std::process::exit(1);
                     }
                 }
                 Ok(_) => {}
-                Err(e) => error!("❌ Tarama hatası: {}", e),
+                Err(e) => error!("Scan error: {}", e),
             }
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
