@@ -1,0 +1,53 @@
+name: TLAC CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - name: Install eBPF Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libbpf-dev linux-headers-generic
+
+      - name: Build eBPF Program
+        run: |
+          mkdir -p bpf
+          clang -g -O2 -target bpf -D__TARGET_ARCH_x86_64 \
+            -I /usr/include/x86_64-linux-gnu \
+            -c bpf/program.bpf.c -o bpf/program.bpf.o
+
+      - name: Build Anti-Cheat Binary
+        run: cargo build --release
+      - name: Ensure bin_hash.txt exists for first build
+        run: touch bin_hash.txt
+      - name: Generate bin_hash.txt
+        run: |
+          sha256sum target/release/anti-cheat | awk '{print $1}' > bin_hash.txt
+          echo "✅ Generated hash:"
+          cat bin_hash.txt
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tlac-release
+          path: |
+            target/release/anti-cheat
+            bin_hash.txt
+            bpf/program.bpf.o
+            install.sh
+            signatures.json

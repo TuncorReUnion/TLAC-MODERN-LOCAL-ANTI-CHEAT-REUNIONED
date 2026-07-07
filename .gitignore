@@ -1,0 +1,10 @@
+target/
+bpf/vmlinux.h
+*.o
+*.ko
+*.mod
+*.mod.c
+*.symvers
+*.order
+bin_hash.txt
+.env

@@ -1,0 +1,7 @@
+# scripts/requirements.txt
+scikit-learn
+pandas
+numpy
+joblib
+skl2onnx
+onnx
