@@ -15,13 +15,13 @@ pub struct BanEntry {
 }
 
 pub struct SyncClient {
-    client: reqwest::Client,
+    client: Client,
     base_url: String,
 }
 
 impl SyncClient {
     pub fn new(url: &str) -> Self {
-        let client = reqwest::Client::builder()
+        let client = Client::builder()
             .timeout(Duration::from_secs(5))
             .build()
             .unwrap();
