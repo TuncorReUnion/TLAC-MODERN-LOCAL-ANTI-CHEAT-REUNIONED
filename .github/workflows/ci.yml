@@ -24,8 +24,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             clang llvm libbpf-dev linux-headers-generic \
-            libudev-dev pkg-config \
-            linux-tools-common linux-tools-generic linux-tools-$(uname -r)
+            libudev-dev pkg-config wget
+
+      - name: Install bpftool Manually
+        run: |
+          wget -q https://github.com/libbpf/bpftool/releases/download/v7.2.0/bpftool-v7.2.0-amd64.tar.gz
+          tar -xzf bpftool-v7.2.0-amd64.tar.gz -C /tmp
+          sudo mv /tmp/bpftool /usr/sbin/bpftool
+          sudo chmod +x /usr/sbin/bpftool
       
       - name: Verify bpftool Installation
         run: bpftool --version
