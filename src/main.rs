@@ -13,14 +13,11 @@ use procfs::process::Process;
 use hex;
 use libudev::Context;
 use log::{warn, error, info};
-use aya::{include_bytes_aligned, Ebpf, programs::TracePoint};
+use aya::{include_bytes_aligned, Bpf, programs::TracePoint};
 use tokio::sync::mpsc;
 use aya::maps::perf::PerfEventArray;
 use aya::util::online_cpus;
 use bytes::BytesMut;
-
-mod ai;
-mod ebpf;
 
 const INFERENCE_INTERVAL: Duration = Duration::from_millis(100);
 const DEFAULT_AI_THRESHOLD: f32 = 0.75;
@@ -345,8 +342,8 @@ async fn report_suspicious_activity(pid: u32, reason: String, socket_path: &str)
     }
 }
 
-pub async fn start_ebpf_event_loop(
-    bpf: &mut Ebpf,
+async fn start_ebpf_event_loop(
+    bpf: &mut Bpf,
     tx: mpsc::Sender<SuspiciousEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut perf_array: PerfEventArray<_> = bpf
@@ -443,7 +440,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!("HWID clean: {}", hwid);
 
-    let mut bpf = Ebpf::load(include_bytes_aligned!("../bpf/program.bpf.o"))?;
+    let mut bpf = Bpf::load(include_bytes_aligned!("../bpf/program.bpf.o"))?;
 
     let (ebpf_tx, mut ebpf_rx) = mpsc::channel::<SuspiciousEvent>(1024);
 
