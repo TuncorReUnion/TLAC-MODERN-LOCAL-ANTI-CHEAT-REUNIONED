@@ -60,3 +60,4 @@ jobs:
             signatures.json
             install.sh
           if-no-files-found: warn
+          
