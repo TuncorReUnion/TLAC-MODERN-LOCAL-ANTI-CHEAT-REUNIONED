@@ -2,11 +2,6 @@ pub mod ai;
 pub mod ebpf;
 pub mod sync_client;
 
-#[cfg(feature = "server")]
-pub mod server;
-#[cfg(feature = "server")]
-pub mod messages;
-
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 pub struct SuspiciousEvent {
@@ -38,5 +33,3 @@ impl SuspiciousEvent {
         }
     }
 }
-
-pub use crate::SuspiciousEvent;
