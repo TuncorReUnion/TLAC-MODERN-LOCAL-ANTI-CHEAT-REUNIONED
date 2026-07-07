@@ -2,6 +2,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::sync::Arc;
 use tokio::net::UnixStream;
 use tokio::io::AsyncWriteExt;
 use rusqlite::Connection;
@@ -239,7 +240,7 @@ fn search_wildcard_pattern_in_memory(pid: u32, start: usize, len: usize, pattern
     None
 }
 
-async fn scan_all_signatures(pid: u32, _conn: &Connection) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error>> {
+async fn scan_all_signatures(pid: u32) -> Result<Vec<FoundCheat>, Box<dyn std::error::Error + Send + Sync>> {
     let sigs = load_signatures()?;
     let mut found = Vec::new();
     let proc = Process::new(pid as i32)?;
@@ -371,14 +372,14 @@ async fn start_ebpf_event_loop(
     Ok(())
 }
 
-async fn process_events(event_buffer: &mut Vec<SuspiciousEvent>, threshold: f32, conn: &Connection) {
+async fn process_events(event_buffer: &mut Vec<SuspiciousEvent>, threshold: f32, conn: Arc<Connection>) {
     for event in event_buffer.iter() {
         let score = event.syscall_type as f32 / 4.0;
         if score > threshold {
             let hwid = generate_hwid();
             error!("Anomaly detected! Score: {:.3} | Syscall: {} | PID: {}",
                    score, event.syscall_name(), event.pid);
-            let _ = ban_hwid(conn, &hwid, &format!("AI anomaly score: {:.3}", score));
+            let _ = ban_hwid(&conn, &hwid, &format!("AI anomaly score: {:.3}", score));
             error!("HWID banned: {}", hwid);
             std::process::exit(1);
         }
@@ -402,7 +403,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Error: PID must be a valid number!");
 
     let hwid = generate_hwid();
-    let conn = init_db().expect("Database cannot be opened");
+    let conn = Arc::new(init_db().expect("Database cannot be opened"));
 
     if is_hwid_banned(&conn, &hwid)? {
         error!("Hardware banned! System cannot start.");
@@ -417,7 +418,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     start_ebpf_event_loop(&mut bpf, ebpf_tx).await?;
 
-    // ✅ DÜZELTİLMİŞ TRACEPOINT ATTACHMENT KODU
     let tracepoint_openat: &mut TracePoint = bpf.program_mut("trace_openat").unwrap().try_into()?;
     tracepoint_openat.load()?;
     tracepoint_openat.attach("syscalls", "sys_enter_openat")?;
@@ -446,37 +446,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_buffer = Vec::with_capacity(64);
     let mut interval = tokio::time::interval(INFERENCE_INTERVAL);
 
+    let conn_clone = Arc::clone(&conn);
     let ai_handle = tokio::spawn(async move {
-        let conn = init_db().expect("Database cannot be opened");
         loop {
             tokio::select! {
                 Some(event) = ebpf_rx.recv() => {
                     event_buffer.push(event);
                     if event_buffer.len() >= 32 {
-                        process_events(&mut event_buffer, threshold, &conn).await;
+                        process_events(&mut event_buffer, threshold, conn_clone).await;
                     }
                 }
                 _ = interval.tick() => {
                     if !event_buffer.is_empty() {
-                        process_events(&mut event_buffer, threshold, &conn).await;
+                        process_events(&mut event_buffer, threshold, conn_clone).await;
                     }
                 }
             }
         }
     });
 
+    let pid_clone = pid;
     let scan_handle = tokio::spawn(async move {
-        let conn = init_db().expect("Database cannot be opened");
         loop {
-            match scan_all_signatures(pid, &conn).await {
+            match scan_all_signatures(pid_clone).await {
                 Ok(found) if !found.is_empty() => {
                     for cheat in found {
                         error!("{} detected at {:#x}!", cheat.name, cheat.address);
                         let hwid = generate_hwid();
+                        let conn = init_db().expect("Database cannot be opened");
                         if let Err(e) = ban_hwid(&conn, &hwid, &cheat.name) {
                             error!("Ban record could not be added: {}", e);
                         }
-                        report_suspicious_activity(pid, format!("{} detected", cheat.name), "/tmp/anti-cheat.sock").await;
+                        report_suspicious_activity(pid_clone, format!("{} detected", cheat.name), "/tmp/anti-cheat.sock").await;
                         error!("System shutting down due to cheat detection");
                         std::process::exit(1);
                     }
