@@ -1,32 +1,38 @@
 [package]
-name = "anti-cheat"
-version = "4.0.0"
+name = "tlac"
+version = "8.0.0"
 edition = "2021"
 authors = ["TuncorReUnion"]
-description = "TLAC - Tuncor's Local Anti-Cheat"
+description = "Tuncor's Local Anti-Cheat - User-space + eBPF + AI powered anti-cheat for Linux"
 license = "MIT"
 repository = "https://github.com/TuncorReUnion/TLAC-MODERN-LOCAL-ANTI-CHEAT-REUNIONED"
 
-[[bin]]
-name = "anti-cheat"
-path = "src/main.rs"
-
-[lib]
-name = "anti_cheat"
-path = "src/lib.rs"
-
 [dependencies]
-nix = { version = "0.31", features = ["process", "ptrace"] }
-procfs = "0.17"
+tokio = { version = "1.37", features = ["full"] }
+rusqlite = "0.31"
+nix = "0.27"
+procfs = "0.16"
+libudev = "0.3"
+hex = "0.4"
 sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hex = "0.4"
-tokio = { version = "1", features = ["full"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
 log = "0.4"
-reqwest = { version = "0.12", features = ["json"] }
-env_logger = "0.11"
-aya = "0.14.0"
-bytes = "1"
-libudev = "0.3"
+env_logger = "0.10"
+anyhow = "1.0"
+bytes = "1.5"
+aya = "0.12"
+tract-onnx = "0.19"
+
+[build-dependencies]
+aya = "0.12"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+strip = true
+
+[features]
+default = []
+ebpf = []
