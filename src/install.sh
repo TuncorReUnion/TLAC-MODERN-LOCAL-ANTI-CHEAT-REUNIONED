@@ -52,10 +52,22 @@ fi
 echo -e "${YELLOW}🔧 Installing kernel module...${NC}"
 if [ -f "./bpf/tlac_kernel.ko" ]; then
     cp "./bpf/tlac_kernel.ko" "$TLAC_KERNEL_MODULE"
-    insmod "$TLAC_KERNEL_MODULE" 2>/dev/null || true
-    echo -e "${GREEN}✅ Kernel module installed to $TLAC_KERNEL_MODULE${NC}"
+    
+    # Remove old module if loaded
+    if lsmod | grep -q tlac_kernel; then
+        rmmod tlac_kernel 2>/dev/null || true
+        echo -e "${YELLOW}⚠️  Old kernel module unloaded${NC}"
+    fi
+    
+    # Load new module
+    insmod "$TLAC_KERNEL_MODULE" 2>/dev/null || {
+        echo -e "${RED}❌ Failed to load kernel module. Check dmesg for details.${NC}"
+        exit 1
+    }
+    echo -e "${GREEN}✅ Kernel module installed and loaded${NC}"
 else
     echo -e "${RED}❌ tlac_kernel.ko not found. Run 'make -C bpf' first.${NC}"
+    exit 1
 fi
 
 # Install eBPF program
@@ -63,6 +75,8 @@ echo -e "${YELLOW}📡 Installing eBPF program...${NC}"
 if [ -f "./bpf/program.bpf.o" ]; then
     cp "./bpf/program.bpf.o" "$BPF_PROG"
     echo -e "${GREEN}✅ eBPF program installed to $BPF_PROG${NC}"
+else
+    echo -e "${YELLOW}⚠️  eBPF program not found, skipping...${NC}"
 fi
 
 # Copy configuration files
@@ -128,7 +142,7 @@ elif [ -d "/etc/sv" ]; then
 exec /usr/local/bin/tlac
 EOF
     chmod +x /etc/sv/tlac/run
-    ln -s /etc/sv/tlac /var/service/
+    ln -sf /etc/sv/tlac /var/service/
     echo -e "${GREEN}✅ Runit service installed${NC}"
 else
     echo -e "${YELLOW}⚠️  No service manager detected. Run manually: sudo /usr/local/bin/tlac${NC}"
