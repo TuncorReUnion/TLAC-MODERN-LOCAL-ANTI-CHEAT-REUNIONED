@@ -22,8 +22,23 @@ echo -e "${YELLOW}⚠️  This will remove TLAC completely from your system.${NC
 read -p "Are you sure? (y/N): " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${GREEN}Uninstallation cancelled.${NC}"
+    echo -e "${GREEN}✅ Uninstallation cancelled.${NC}"
     exit 0
+fi
+
+# Stop service if running
+echo -e "${YELLOW}🛑 Stopping TLAC service...${NC}"
+if command -v systemctl &>/dev/null; then
+    if systemctl is-active --quiet tlac.service 2>/dev/null; then
+        systemctl stop tlac.service
+        echo -e "${GREEN}✅ Systemd service stopped${NC}"
+    fi
+    systemctl disable tlac.service 2>/dev/null || true
+elif [ -d "/etc/sv" ]; then
+    if sv status tlac 2>/dev/null | grep -q run; then
+        sv down tlac
+        echo -e "${GREEN}✅ Runit service stopped${NC}"
+    fi
 fi
 
 # Remove binaries
@@ -35,7 +50,9 @@ echo -e "${GREEN}✅ Binaries removed${NC}"
 # Remove kernel module
 echo -e "${YELLOW}🔧 Removing kernel module...${NC}"
 if lsmod | grep -q tlac_kernel; then
-    rmmod tlac_kernel 2>/dev/null || true
+    rmmod tlac_kernel 2>/dev/null || {
+        echo -e "${YELLOW}⚠️  Could not unload kernel module (maybe in use?)${NC}"
+    }
     echo -e "${GREEN}✅ Kernel module unloaded${NC}"
 fi
 rm -f /lib/modules/$(uname -r)/tlac_kernel.ko
@@ -57,18 +74,13 @@ rm -rf /var/log/tlac
 rm -f /etc/logrotate.d/tlac
 echo -e "${GREEN}✅ Log files removed${NC}"
 
-# Remove service
-echo -e "${YELLOW}🔄 Removing service...${NC}"
+# Remove service files
+echo -e "${YELLOW}🔄 Removing service files...${NC}"
 if command -v systemctl &>/dev/null; then
-    if systemctl is-active --quiet tlac.service 2>/dev/null; then
-        systemctl stop tlac.service
-    fi
-    systemctl disable tlac.service 2>/dev/null || true
     rm -f /etc/systemd/system/tlac.service
     systemctl daemon-reload
     echo -e "${GREEN}✅ Systemd service removed${NC}"
 elif [ -d "/etc/sv" ]; then
-    sv down tlac 2>/dev/null || true
     rm -f /var/service/tlac
     rm -rf /etc/sv/tlac
     echo -e "${GREEN}✅ Runit service removed${NC}"
@@ -77,5 +89,8 @@ fi
 # Remove empty directories
 echo -e "${YELLOW}🧹 Cleaning up directories...${NC}"
 rmdir /usr/lib/tlac 2>/dev/null || true
+rmdir /var/log/tlac 2>/dev/null || true
 
-echo -e "${GREEN}✅ TLAC $VERSION uninstallation completed!${NC}"
+echo -e "${GREEN}✅ TLAC 9.0 uninstallation completed!${NC}"
+echo -e "${YELLOW}💡 If you want to remove the tlac user group, run:${NC}"
+echo -e "   sudo groupdel tlac 2>/dev/null || true"
