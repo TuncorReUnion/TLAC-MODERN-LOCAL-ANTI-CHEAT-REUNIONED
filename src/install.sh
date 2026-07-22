@@ -1,43 +1,162 @@
 #!/bin/bash
+# TLAC - Tuncor's Local Anti-Cheat
+# Installation script for TLAC 9.0
+
 set -e
 
-echo "🔧 TLAC v8.0 Sistem Entegrasyonu Başlatılıyor..."
+echo "🚀 TLAC 9.0 Installation Starting..."
 
-if [ "$(id -u)" -ne 0 ]; then
-    echo "❌ Hata: Bu işlem root yetkisi gerektirir."
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${RED}❌ Please run as root (sudo ./install.sh)${NC}"
     exit 1
 fi
 
-REQUIRED_FILES=("tlac" "server_main" "tlac_kernel.ko" "program.bpf.o" "anomaly_model.onnx" "signatures.json")
-for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -f "./$file" ]; then
-        echo "❌ Hata: Gerekli dosya bulunamadı: $file"
-        exit 1
-    fi
-done
+# Define paths
+TLAC_BIN="/usr/local/bin/tlac"
+TLAC_SERVER="/usr/local/bin/tlac-server"
+TLAC_KERNEL_MODULE="/lib/modules/$(uname -r)/tlac_kernel.ko"
+TLAC_CONFIG_DIR="/etc/tlac"
+BPF_PROG="/usr/lib/tlac/program.bpf.o"
+VERSION="9.0"
 
-echo " Dizin Yapısı Oluşturuluyor..."
-mkdir -p /etc/tlac
-mkdir -p /lib/tlac
-mkdir -p /var/lib/tlac
+echo -e "${YELLOW}📁 Creating directories...${NC}"
+mkdir -p "$TLAC_CONFIG_DIR"
+mkdir -p "/usr/lib/tlac"
+mkdir -p "/var/log/tlac"
 
-echo "🛡️ Binary Dosyaları Yükleniyor..."
-cp ./tlac /usr/local/bin/tlac
-cp ./server_main /usr/local/bin/server_main
-chmod +x /usr/local/bin/tlac
-chmod +x /usr/local/bin/server_main
+# Copy binaries
+echo -e "${YELLOW}📦 Installing binaries...${NC}"
+if [ -f "./target/release/tlac" ]; then
+    cp "./target/release/tlac" "$TLAC_BIN"
+    chmod 755 "$TLAC_BIN"
+    echo -e "${GREEN}✅ tlac installed to $TLAC_BIN${NC}"
+else
+    echo -e "${RED}❌ tlac binary not found. Run 'cargo build --release' first.${NC}"
+    exit 1
+fi
 
-echo " Kernel ve eBPF Bileşenleri Yerleştiriliyor..."
-cp ./tlac_kernel.ko /lib/tlac/tlac_kernel.ko
-cp ./program.bpf.o /lib/tlac/program.bpf.o
+if [ -f "./target/release/server_main" ]; then
+    cp "./target/release/server_main" "$TLAC_SERVER"
+    chmod 755 "$TLAC_SERVER"
+    echo -e "${GREEN}✅ tlac-server installed to $TLAC_SERVER${NC}"
+fi
 
-echo "🧠 AI Modeli ve İmzalar Yapılandırılıyor..."
-cp ./anomaly_model.onnx /etc/tlac/anomaly_model.onnx
-cp ./signatures.json /etc/tlac/signatures.json
+# Install kernel module
+echo -e "${YELLOW}🔧 Installing kernel module...${NC}"
+if [ -f "./bpf/tlac_kernel.ko" ]; then
+    cp "./bpf/tlac_kernel.ko" "$TLAC_KERNEL_MODULE"
+    insmod "$TLAC_KERNEL_MODULE" 2>/dev/null || true
+    echo -e "${GREEN}✅ Kernel module installed to $TLAC_KERNEL_MODULE${NC}"
+else
+    echo -e "${RED}❌ tlac_kernel.ko not found. Run 'make -C bpf' first.${NC}"
+fi
 
-echo "💾 Veritabanı Başlatılıyor..."
-touch /var/lib/tlac/anti_cheat.db
+# Install eBPF program
+echo -e "${YELLOW}📡 Installing eBPF program...${NC}"
+if [ -f "./bpf/program.bpf.o" ]; then
+    cp "./bpf/program.bpf.o" "$BPF_PROG"
+    echo -e "${GREEN}✅ eBPF program installed to $BPF_PROG${NC}"
+fi
 
-echo "✅ TLAC v8.0 Başarıyla Sisteme Entegre Edildi!"
-echo "   Anti-Cheat: sudo tlac <hedef_pid>"
-echo "   Sunucu:     sudo server_main"
+# Copy configuration files
+echo -e "${YELLOW}⚙️  Installing configuration files...${NC}"
+if [ -f "./src/signatures.json" ]; then
+    cp "./src/signatures.json" "$TLAC_CONFIG_DIR/"
+    echo -e "${GREEN}✅ signatures.json copied${NC}"
+fi
+
+if [ -f "./scripts/anomaly_model.onnx" ]; then
+    cp "./scripts/anomaly_model.onnx" "$TLAC_CONFIG_DIR/"
+    echo -e "${GREEN}✅ AI model (ONNX) copied${NC}"
+fi
+
+# Create config file
+echo -e "${YELLOW}📝 Creating default configuration...${NC}"
+cat > "$TLAC_CONFIG_DIR/config.toml" << 'EOF'
+[general]
+log_level = "info"
+log_file = "/var/log/tlac/tlac.log"
+
+[server]
+listen_addr = "127.0.0.1:8080"
+
+[anti_cheat]
+signature_file = "/etc/tlac/signatures.json"
+model_file = "/etc/tlac/anomaly_model.onnx"
+eBPF_program = "/usr/lib/tlac/program.bpf.o"
+kernel_module = "/lib/modules/$(uname -r)/tlac_kernel.ko"
+
+[protection]
+enabled = true
+mode = "active"
+ban_threshold = 5
+EOF
+
+# Set up service (runit for Void, systemd for others)
+echo -e "${YELLOW}🔄 Setting up service...${NC}"
+if command -v systemctl &>/dev/null; then
+    cat > /etc/systemd/system/tlac.service << 'EOF'
+[Unit]
+Description=TLAC - Tuncor's Local Anti-Cheat
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tlac
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable tlac.service
+    echo -e "${GREEN}✅ Systemd service installed${NC}"
+elif [ -d "/etc/sv" ]; then
+    mkdir -p /etc/sv/tlac
+    cat > /etc/sv/tlac/run << 'EOF'
+#!/bin/sh
+exec /usr/local/bin/tlac
+EOF
+    chmod +x /etc/sv/tlac/run
+    ln -s /etc/sv/tlac /var/service/
+    echo -e "${GREEN}✅ Runit service installed${NC}"
+else
+    echo -e "${YELLOW}⚠️  No service manager detected. Run manually: sudo /usr/local/bin/tlac${NC}"
+fi
+
+# Create log rotation
+echo -e "${YELLOW}📋 Setting up log rotation...${NC}"
+if command -v logrotate &>/dev/null; then
+    cat > /etc/logrotate.d/tlac << 'EOF'
+/var/log/tlac/tlac.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    create 0640 root root
+}
+EOF
+    echo -e "${GREEN}✅ Log rotation configured${NC}"
+fi
+
+# Add user to required groups
+echo -e "${YELLOW}👤 Adding current user to required groups...${NC}"
+if [ -n "$SUDO_USER" ]; then
+    usermod -aG input,video,audio "$SUDO_USER" 2>/dev/null || true
+    echo -e "${GREEN}✅ User $SUDO_USER added to input,video,audio groups${NC}"
+fi
+
+echo -e "${GREEN}✅ TLAC $VERSION installation completed!${NC}"
+echo -e "${YELLOW}🚀 Start TLAC: sudo tlac${NC}"
+echo -e "${YELLOW}📖 Check logs: sudo journalctl -u tlac${NC}"
