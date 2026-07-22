@@ -33,25 +33,25 @@ mkdir -p "/var/log/tlac"
 
 # Copy binaries
 echo -e "${YELLOW}📦 Installing binaries...${NC}"
-if [ -f "./target/release/tlac" ]; then
-    cp "./target/release/tlac" "$TLAC_BIN"
+if [ -f "./tlac" ]; then
+    cp "./tlac" "$TLAC_BIN"
     chmod 755 "$TLAC_BIN"
     echo -e "${GREEN}✅ tlac installed to $TLAC_BIN${NC}"
 else
-    echo -e "${RED}❌ tlac binary not found. Run 'cargo build --release' first.${NC}"
+    echo -e "${RED}❌ tlac binary not found.${NC}"
     exit 1
 fi
 
-if [ -f "./target/release/server_main" ]; then
-    cp "./target/release/server_main" "$TLAC_SERVER"
+if [ -f "./server_main" ]; then
+    cp "./server_main" "$TLAC_SERVER"
     chmod 755 "$TLAC_SERVER"
     echo -e "${GREEN}✅ tlac-server installed to $TLAC_SERVER${NC}"
 fi
 
 # Install kernel module
 echo -e "${YELLOW}🔧 Installing kernel module...${NC}"
-if [ -f "./bpf/tlac_kernel.ko" ]; then
-    cp "./bpf/tlac_kernel.ko" "$TLAC_KERNEL_MODULE"
+if [ -f "./tlac_kernel.ko" ]; then
+    cp "./tlac_kernel.ko" "$TLAC_KERNEL_MODULE"
     
     # Remove old module if loaded
     if lsmod | grep -q tlac_kernel; then
@@ -66,14 +66,14 @@ if [ -f "./bpf/tlac_kernel.ko" ]; then
     }
     echo -e "${GREEN}✅ Kernel module installed and loaded${NC}"
 else
-    echo -e "${RED}❌ tlac_kernel.ko not found. Run 'make -C bpf' first.${NC}"
+    echo -e "${RED}❌ tlac_kernel.ko not found.${NC}"
     exit 1
 fi
 
 # Install eBPF program
 echo -e "${YELLOW}📡 Installing eBPF program...${NC}"
-if [ -f "./bpf/program.bpf.o" ]; then
-    cp "./bpf/program.bpf.o" "$BPF_PROG"
+if [ -f "./program.bpf.o" ]; then
+    cp "./program.bpf.o" "$BPF_PROG"
     echo -e "${GREEN}✅ eBPF program installed to $BPF_PROG${NC}"
 else
     echo -e "${YELLOW}⚠️  eBPF program not found, skipping...${NC}"
@@ -81,13 +81,13 @@ fi
 
 # Copy configuration files
 echo -e "${YELLOW}⚙️  Installing configuration files...${NC}"
-if [ -f "./src/signatures.json" ]; then
-    cp "./src/signatures.json" "$TLAC_CONFIG_DIR/"
+if [ -f "./signatures.json" ]; then
+    cp "./signatures.json" "$TLAC_CONFIG_DIR/"
     echo -e "${GREEN}✅ signatures.json copied${NC}"
 fi
 
-if [ -f "./scripts/anomaly_model.onnx" ]; then
-    cp "./scripts/anomaly_model.onnx" "$TLAC_CONFIG_DIR/"
+if [ -f "./anomaly_model.onnx" ]; then
+    cp "./anomaly_model.onnx" "$TLAC_CONFIG_DIR/"
     echo -e "${GREEN}✅ AI model (ONNX) copied${NC}"
 fi
 
